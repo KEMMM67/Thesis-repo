@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Algorithm Comparative Analysis | SIS</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #f4f6f9; display: flex; flex-direction: column; min-height: 100vh; }
+        
+        /* Enverga Maroon Theme Navbar */
+        .topbar { background-color: #800000; color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .topbar .logo { font-weight: bold; font-size: 18px; letter-spacing: 1px; text-transform: uppercase; }
+        .topbar .subtitle { font-size: 14px; opacity: 0.8; }
+
+        .container { padding: 40px; text-align: center; }
+        .header-text { color: #800000; margin-bottom: 30px; }
+
+        /* 3-Column Layout for Comparison */
+        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; max-width: 1200px; margin: 0 auto; }
+        
+        .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); border-top: 5px solid #ccc; transition: 0.3s; }
+        .card.traditional { border-top-color: #6c757d; } /* Gray for old tech */
+        .card.rulebased { border-top-color: #fd7e14; } /* Orange for strict rules */
+        .card.agentic { border-top-color: #28a745; border-width: 8px; transform: scale(1.02); box-shadow: 0 8px 15px rgba(0,0,0,0.1);} /* Green & Bigger for your thesis */
+        
+        .card h2 { font-size: 18px; color: #333; margin-bottom: 10px; }
+        .card p.desc { font-size: 12px; color: #666; margin-bottom: 20px; height: 40px; }
+        
+        /* Simulation UI */
+        .status-box { height: 60px; background: #eee; border-radius: 4px; display: flex; justify-content: center; align-items: center; font-weight: bold; font-size: 14px; margin-bottom: 20px; color: #333; }
+        .status-box.blocked { background: #dc3545; color: white; }
+        .status-box.allowed { background: #28a745; color: white; }
+        .status-box.warning { background: #ffc107; color: black; }
+
+        .btn-test { width: 100%; padding: 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; background-color: #800000; color: white; font-size: 14px; text-transform: uppercase; }
+        .btn-test:hover { background-color: #660000; }
+        .btn-test:disabled { background-color: #555; cursor: not-allowed; }
+
+        .logs { margin-top: 15px; font-size: 11px; color: #888; text-align: left; background: #fafafa; padding: 10px; border: 1px solid #eee; height: 100px; overflow-y: auto; }
+        .logs span { display: block; border-bottom: 1px solid #f0f0f0; padding: 2px 0; }
+    </style>
+</head>
+<body>
+
+    <div class="topbar">
+        <div class="logo">Algorithm Comparative Analysis Mode</div>
+        <div class="subtitle">System Defense Simulation</div>
+    </div>
+
+    <div class="container">
+        <h1 class="header-text">Security Mitigation Simulation</h1>
+        <p style="color: #666; margin-bottom: 40px;">Test the three algorithms by clicking the "Simulate Login" button. Try clicking slowly, and then try clicking as fast as you can.</p>
+
+        <div class="grid">
+            <div class="card traditional">
+                <h2>1. Traditional (3-Strike)</h2>
+                <p class="desc">Blocks the user completely after 3 failed clicks, regardless of speed.</p>
+                <div class="status-box" id="status-trad">STATUS: WAITING</div>
+                <button class="btn-test" id="btn-trad" onclick="testTraditional()">Simulate Login Click</button>
+                <div class="logs" id="log-trad"></div>
+            </div>
+
+            <div class="card rulebased">
+                <h2>2. Rule-Based (Static Limit)</h2>
+                <p class="desc">Strictly blocks if user clicks more than 2 times in one second (False Positive Prone).</p>
+                <div class="status-box" id="status-rule">STATUS: WAITING</div>
+                <button class="btn-test" id="btn-rule" onclick="testRuleBased()">Simulate Login Click</button>
+                <div class="logs" id="log-rule"></div>
+            </div>
+
+            <div class="card agentic">
+                <h2 style="color: #28a745;">⭐ 3. Adaptive EMA (Ours)</h2>
+                <p class="desc">Learns your clicking speed. Punishes sudden spikes but forgives natural fast typists.</p>
+                <div class="status-box" id="status-ema">STATUS: WAITING</div>
+                <button class="btn-test" id="btn-ema" onclick="testEMA()">Simulate Login Click</button>
+                <div class="logs" id="log-ema"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- HELPER FUNCTION FOR LOGS ---
+        function addLog(elementId, message) {
+            const logDiv = document.getElementById(elementId);
+            logDiv.innerHTML = `<span>[${new Date().toLocaleTimeString()}] ${message}</span>` + logDiv.innerHTML;
+        }
+
+        function setStatus(id, text, state) {
+            const box = document.getElementById(id);
+            box.innerText = text;
+            box.className = `status-box ${state}`;
+        }
+
+        // ==========================================
+        // ALGO 1: TRADITIONAL SECURITY
+        // ==========================================
+        let tradAttempts = 0;
+        function testTraditional() {
+            tradAttempts++;
+            const btn = document.getElementById('btn-trad');
+            
+            if (tradAttempts >= 3) {
+                setStatus('status-trad', 'BLOCKED: Exceeded 3 Attempts', 'blocked');
+                btn.disabled = true;
+                addLog('log-trad', 'Account permanently locked.');
+            } else {
+                setStatus('status-trad', `FAILED: Attempt ${tradAttempts}/3`, 'warning');
+                addLog('log-trad', 'Invalid login attempt.');
+            }
+        }
+
+        // ==========================================
+        // ALGO 2: RULE-BASED SECURITY (Static)
+        // ==========================================
+        let ruleClicks = [];
+        function testRuleBased() {
+            const now = Date.now();
+            ruleClicks.push(now);
+            const btn = document.getElementById('btn-rule');
+
+            // Remove clicks older than 1 second
+            ruleClicks = ruleClicks.filter(t => now - t < 1000);
+
+            if (ruleClicks.length > 2) {
+                setStatus('status-rule', 'BLOCKED: Speed Limit Exceeded', 'blocked');
+                btn.disabled = true;
+                addLog('log-rule', `Detected ${ruleClicks.length} clicks/sec. Static rule broken.`);
+            } else {
+                setStatus('status-rule', 'ALLOW: Speed Normal', 'allowed');
+                addLog('log-rule', 'Login processed.');
+            }
+        }
+
+        // ==========================================
+        // ALGO 3: ADAPTIVE EMA (Your Thesis)
+        // ==========================================
+        let emaClicks = [];
+        let baselineSpeed = 0; // Starts at 0
+        let emaScore = 0;
+
+        function testEMA() {
+            const now = Date.now();
+            emaClicks.push(now);
+            const btn = document.getElementById('btn-ema');
+
+            // 1. Sliding Window (Last 1.5 seconds for demo purposes)
+            emaClicks = emaClicks.filter(t => now - t < 1500);
+            let currentSpeed = emaClicks.length;
+
+            // 2. Adaptive Learning (EMA Formula)
+            baselineSpeed = (currentSpeed * 0.2) + (baselineSpeed * 0.8);
+
+            // 3. Heuristic Scoring (Penalty if current speed is suddenly way higher than baseline)
+            let speedDiff = currentSpeed - baselineSpeed;
+            if (speedDiff > 2) {
+                emaScore += (speedDiff * 20); // Add massive penalty for sudden spike
+            } else {
+                emaScore -= 5; // Forgive if clicking normally
+            }
+
+            // Cap score
+            if (emaScore < 0) emaScore = 0;
+            if (emaScore > 100) emaScore = 100;
+
+            // 4. Decision Engine
+            if (emaScore >= 80) {
+                setStatus('status-ema', `BLOCK (Score: ${Math.round(emaScore)})`, 'blocked');
+                btn.disabled = true;
+                addLog('log-ema', `CRITICAL: Sudden spike. Anomaly Score reached ${Math.round(emaScore)}.`);
+            } else if (emaScore >= 40) {
+                setStatus('status-ema', `THROTTLE (Score: ${Math.round(emaScore)})`, 'warning');
+                addLog('log-ema', `WARNING: Suspicious speed detected.`);
+            } else {
+                setStatus('status-ema', `ALLOW (Score: ${Math.round(emaScore)})`, 'allowed');
+                addLog('log-ema', `Learned baseline: ${baselineSpeed.toFixed(1)}. Speed is natural.`);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Registration | SIS</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="login-body">
+
+    <div class="registration-card">
+        <svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3L4 6V11C4 15.5 7.2 19.7 12 21C16.8 19.7 20 15.5 20 11V6L12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+            <path d="M9 12L11 14L15.5 9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <h1>Student Information System</h1>
+        <h2>Student Registration</h2>
+
+        <form id="signupForm">
+            <div class="form-grid">
+                <div class="form-group">
+                    <label class="required">Student ID</label>
+                    <input type="text" id="studentId" placeholder="A24-00123">
+                </div>
+                <div class="form-group">
+                    <label class="required">Email Address</label>
+                    <input type="email" id="email" placeholder="Auto-generated from ID">
+                </div>
+
+                <div class="form-group">
+                    <label class="required">First Name</label>
+                    <input type="text" id="firstName">
+                </div>
+                <div class="form-group">
+                    <label class="required">Last Name</label>
+                    <input type="text" id="lastName">
+                </div>
+
+                <div class="form-group">
+                    <label class="required">Department</label>
+                    <select id="department">
+                        <option>Select Department</option>
+                        <option>College of Computing and Multimedia Studies (CCMS)</option>
+                        <option>College of Arts and Sciences (CAS)</option>
+                        <option>College of Engineering (CENG)</option>
+                        <option>College of Int'l Hospitality and Tourism Management(CIHTM)</option>
+                        <option>College of Nursing & Allied Health (CNAHS)</option>
+                        <option>College of Education (CED)</option>
+                        <option>College of Criminal Justice and Security (CCJS)</option>
+                        <option>College of Maritime Education (CME)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="required">Program</label>
+                    <select id="program">
+                        <option>Select Program</option>
+                        <option>BS Computer Science</option>
+                        <option>BS Information Technology</option>
+                        <option>BS Civil Engineering</option>
+                        <option>BS Criminology</option>
+                        <option>BS Nursing</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="required">Year Level</label>
+                    <select id="yearLevel">
+                        <option>1st Year</option>
+                        <option>2nd Year</option>
+                        <option>3rd Year</option>
+                        <option>4th Year</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="required">Semester</label>
+                    <select id="semester">
+                        <option>1st Semester, 2025-2026</option>
+                        <option>2nd Semester, 2025-2026</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="required">Password</label>
+                    <input type="password" id="password">
+                </div>
+                <div class="form-group">
+                    <label class="required">Confirm Password</label>
+                    <input type="password" id="confirmPassword">
+                </div>
+            </div>
+
+            <button type="submit" class="btn-register">Create Student Account</button>
+        </form>
+
+        <div class="form-footer-link">Already have an account? <a href="index.html">Login</a></div>
+
+        <div class="note">Note: Only students can self-register. Admin accounts must be created by administrators.</div>
+        <div class="note danger"><b>Note:</b> You should provide a valid Student ID. Incorrect formatting will cause security mitigation.</div>
+    </div>
+
+    <script>
+        const signupForm = document.getElementById('signupForm');
+        signupForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            window.location.href = 'student_dashboard.html';
+        });
+    </script>
+
+</body>
+</html>

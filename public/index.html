@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Information System - Login</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="login-body">
+
+    <div class="login-card">
+        <div class="top-red-bar"></div>
+
+        <div class="card-content">
+            <svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 3L4 6V11C4 15.5 7.2 19.7 12 21C16.8 19.7 20 15.5 20 11V6L12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                <path d="M9 12L11 14L15.5 9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h2 class="sys-title">STUDENT INFORMATION SYSTEM</h2>
+            <h3 class="login-header">Secure Login</h3>
+
+            <form id="loginForm">
+                <div class="input-group">
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" placeholder="Enter your email address" required>
+                </div>
+
+                <div class="input-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="Password" required>
+                </div>
+
+                <button type="submit" class="login-btn">Login</button>
+
+                <div id="loginMessage" class="login-message" style="display: none;"></div>
+            </form>
+
+            <p class="signup-text">Don't have an account? <a href="signup.html">Sign Up as Student</a></p>
+
+            <div class="test-accounts-section">
+                <p class="test-title">Test Accounts</p>
+                <p>Admin: admin@example.edu.ph / admin123</p>
+                <p>Student: student@example.edu.ph / student123</p>
+                <p>Note: Admin accounts are created by administrators.</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

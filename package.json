@@ -1,0 +1,35 @@
+{
+  "name": "student_info_system",
+  "version": "1.0.0",
+  "description": "Behavioral Profiling Security Framework for SIS",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "nodemon server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "security",
+    "thesis",
+    "behavioral-profiling"
+  ],
+  "author": "Khynne Mark Elmer Lawan",
+  "license": "ISC",
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.1",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14",
+    "prisma": "^6.19.3"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  }
+}

@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard | SIS</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="dashboard-body">
+
+    <div class="topbar">
+        <div class="logo"><i class="fa-solid fa-graduation-cap"></i> STUDENT INFORMATION SYSTEM</div>
+        <div class="user-info">
+            <span class="user-chip"><i class="fa-solid fa-user-shield"></i> System <span class="role-tag">ADMIN</span></span>
+            <a href="#"><i class="fa-solid fa-gear"></i> Settings</a>
+            <a href="index.html"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
+        </div>
+    </div>
+
+    <div class="wrapper">
+        <div class="sidebar">
+            <ul id="sidebar-nav">
+                <li class="active" data-section="section-dashboard"><i class="nav-icon fa-solid fa-gauge-high"></i><span class="nav-label">Dashboard</span></li>
+                <li data-section="section-student-records"><i class="nav-icon fa-solid fa-user-graduate"></i><span class="nav-label">Student Records</span></li>
+                <li data-section="section-subject-management"><i class="nav-icon fa-solid fa-book"></i><span class="nav-label">Subject Management</span></li>
+                <li data-section="section-grade-management"><i class="nav-icon fa-solid fa-square-poll-vertical"></i><span class="nav-label">Grade Management</span></li>
+                <li data-section="section-payment-records"><i class="nav-icon fa-solid fa-receipt"></i><span class="nav-label">Payment Records</span></li>
+                <li data-section="section-security-logs"><i class="nav-icon fa-solid fa-shield-halved"></i><span class="nav-label">Security &amp; Logs</span></li>
+                <li data-section="section-admin-settings"><i class="nav-icon fa-solid fa-sliders"></i><span class="nav-label">Admin Settings</span></li>
+            </ul>
+        </div>
+
+        <div class="content" id="main-content">
+            <h1 id="main-title">Admin Dashboard</h1>
+
+            <div class="section-container" id="section-dashboard" style="display: block;">
+                <div class="cards-container">
+                    <div class="card card--stat">
+                        <div class="card-icon"><i class="fa-solid fa-users"></i></div>
+                        <div class="card-body"><h3>Total Students Enrolled</h3><div class="value">12,847</div></div>
+                    </div>
+                    <div class="card card--stat">
+                        <div class="card-icon card-icon--danger"><i class="fa-solid fa-shield-halved"></i></div>
+                        <div class="card-body"><h3>Security Threats Blocked</h3><div class="value">24</div></div>
+                    </div>
+                    <div class="card card--stat">
+                        <div class="card-icon"><i class="fa-solid fa-book-open"></i></div>
+                        <div class="card-body"><h3>Total Subjects Offered</h3><div class="value">412</div></div>
+                    </div>
+                    <div class="card card--stat">
+                        <div class="card-icon"><i class="fa-solid fa-layer-group"></i></div>
+                        <div class="card-body"><h3>Active Sections</h3><div class="value">158</div></div>
+                    </div>
+                </div>
+                <h2>Recent Enrollment Trends</h2>
+                <div class="chart-placeholder"><i class="fa-solid fa-chart-line"></i> Chart will load here...</div>
+            </div>
+
+            <div class="section-container" id="section-student-records">
+                <h2>All Student Records</h2>
+                <div class="search-bar">
+                    <input type="text" placeholder="Search by Student Name or ID...">
+                    <button><i class="fa-solid fa-magnifying-glass"></i> Search</button>
+                    <button id="btnAddStudent" class="btn-secondary"><i class="fa-solid fa-plus"></i> Add New Student</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Student ID</th>
+                            <th>Full Name</th>
+                            <th>Department</th>
+                            <th>Program</th>
+                            <th>Year Level</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="studentsTableBody">
+                        <tr data-id="A23-00001"><td><strong>A23-00001</strong></td><td>LAWAN, KHYNNE MARK ELMER</td><td>CCMS</td><td>BSCS - SoftEng</td><td>3rd Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                        <tr data-id="A23-00002"><td><strong>A23-00002</strong></td><td>DELEÑA, KENJIE</td><td>CCMS</td><td>BSCS - SoftEng</td><td>3rd Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                        <tr data-id="A23-00003"><td><strong>A23-00003</strong></td><td>LABSO, JOHN ELON</td><td>CCMS</td><td>BSCS - SoftEng</td><td>3rd Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                        <tr data-id="B24-10521"><td><strong>B24-10521</strong></td><td>MENDOZA, MARIA CLARA</td><td>CAS</td><td>BS Psychology</td><td>2nd Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                        <tr data-id="C22-44122"><td><strong>C22-44122</strong></td><td>SANTOS, JUAN DELA CRUZ</td><td>CENG</td><td>BS Civil Eng</td><td>4th Year</td><td><span class="badge bg-warning">IRREGULAR</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                        <tr data-id="D25-99211"><td><strong>D25-99211</strong></td><td>REYES, ANA MARIE</td><td>CIHTM</td><td>BS Tourism</td><td>1st Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                        <tr data-id="E23-33291"><td><strong>E23-33291</strong></td><td>GARCIA, MARK ANTHONY</td><td>CCJS</td><td>BS Criminology</td><td>3rd Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                        <tr data-id="F24-88124"><td><strong>F24-88124</strong></td><td>FLORES, SAMANTHA</td><td>CNAHS</td><td>BS Nursing</td><td>2nd Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                        <tr data-id="G22-77451"><td><strong>G22-77451</strong></td><td>CRUZ, JOSHUA</td><td>CED</td><td>BSEd Mathematics</td><td>4th Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                        <tr data-id="H25-11094"><td><strong>H25-11094</strong></td><td>BAUTISTA, CHLOE</td><td>CCMS</td><td>BS Info Tech</td><td>1st Year</td><td><span class="badge bg-danger">DROPPED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="section-container" id="section-subject-management">
+                <h2>Subject Catalog</h2>
+                <div class="search-bar">
+                    <input type="text" placeholder="Search by Subject Code or Title...">
+                    <button><i class="fa-solid fa-magnifying-glass"></i> Search</button>
+                    <button id="btnAddSubject" class="btn-secondary"><i class="fa-solid fa-plus"></i> Add Subject</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr><th>Subject Code</th><th>Subject Title</th><th>Units</th><th>Department</th><th>Actions</th></tr>
+                    </thead>
+                    <tbody id="subjectsTableBody">
+                        <tr data-id="SE301"><td><strong>SE301</strong></td><td>Software Engineering 1</td><td>3</td><td>CCMS</td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                        <tr data-id="IAS301"><td><strong>IAS301</strong></td><td>Information Assurance and Security</td><td>3</td><td>CCMS</td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                        <tr data-id="HCI101"><td><strong>HCI101</strong></td><td>Human-Computer Interaction</td><td>3</td><td>CCMS</td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="section-container" id="section-grade-management">
+                <h2>Generate Grade Report</h2>
+                <div class="search-bar"><input type="text" placeholder="Enter Student ID..."><button><i class="fa-solid fa-magnifying-glass"></i> Search</button></div>
+                <div class="chart-placeholder chart-placeholder--sm"><i class="fa-solid fa-magnifying-glass-chart"></i> Search a student to view/edit grades.</div>
+            </div>
+
+            <div class="section-container" id="section-payment-records">
+                <h2>All Student Payments</h2>
+                <div class="search-bar"><input type="text" placeholder="Search by Student ID or OR Number..."><button><i class="fa-solid fa-magnifying-glass"></i> Search</button></div>
+                <table>
+                    <thead>
+                        <tr><th>Student ID</th><th>OR Number</th><th>Date Paid</th><th>Amount (₱)</th><th>Description</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>A23-00001</strong></td><td>OR-10201</td><td>2026-03-01</td><td>18,500.00</td><td>Full Tuition</td></tr>
+                        <tr><td><strong>A23-00002</strong></td><td>OR-10202</td><td>2026-03-05</td><td>10,000.00</td><td>Partial Tuition</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="section-container" id="section-security-logs">
+                <div class="section-header">
+                    <h2>Live Security Logs</h2>
+                    <button class="refresh-btn" onclick="fetchLogs()"><i class="fa-solid fa-rotate"></i> Refresh Live Data</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr><th>Time</th><th>User Identifier</th><th>Event Status</th><th>System Action / Description</th></tr>
+                    </thead>
+                    <tbody id="logsTableBody">
+                        <tr><td colspan="4">Loading system logs...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="section-container" id="section-admin-settings">
+                <h2>Settings</h2>
+                <div class="settings-group">
+                    <h3>User Roles Management</h3>
+                    <div class="btn-row">
+                        <button class="btn-primary"><i class="fa-solid fa-user-plus"></i> Create New Admin Account</button>
+                        <button class="btn-secondary"><i class="fa-solid fa-key"></i> Manage System Access</button>
+                    </div>
+                </div>
+                <div class="settings-group">
+                    <h3>Database Backup</h3>
+                    <div class="btn-row">
+                        <button class="btn-primary"><i class="fa-solid fa-database"></i> Backup PostgreSQL DB</button>
+                        <button class="btn-secondary"><i class="fa-solid fa-rotate-left"></i> Restore DB from Backup</button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // =================================================================
+        // CONFIG + SHARED HELPERS
+        // =================================================================
+        const API_BASE = 'http://localhost:3000';
+
+        // Escapes text before it goes into innerHTML, so data that ultimately
+        // traces back to user input (a log's user_email is whatever someone
+        // typed into the login form; a prompt() value is typed directly by
+        // this admin) can never be interpreted as markup.
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str == null ? '' : String(str);
+            return div.innerHTML;
+        }
+
+        // Clears the stored session and sends the admin back to the login
+        // page. Used both for "never logged in" and "server rejected the
+        // token" - see authFetch() below.
+        function goToLogin() {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('userEmail');
+            window.location.href = 'index.html';
+        }
+
+        // Every fetch() against an authMiddleware-protected route goes
+        // through here instead of calling fetch() directly, so token
+        // attachment only needs to be correct in one place. (This was the
+        // actual bug: fetchLogs() used to call fetch() with no Authorization
+        // header at all, so GET /api/admin/logs always 401'd and the logs
+        // table just sat on "Loading system logs..." forever with nothing
+        // visible to explain why.)
+        //
+        // A missing token and a rejected token (expired/invalid - a 401 from
+        // authMiddleware) are treated identically: both send the admin back
+        // to login rather than leaving the page in a half-authenticated
+        // state. Anything else - success, 400 validation errors, 403 from
+        // requireRole/BLOCK, 429 THROTTLE - is returned as-is so the caller
+        // can read the server's own {success, message} body.
+        async function authFetch(path, options = {}) {
+            const token = localStorage.getItem('authToken');
+
+            if (!token) {
+                goToLogin();
+                return new Promise(() => {}); // navigation is already underway
+            }
+
+            const response = await fetch(`${API_BASE}${path}`, {
+                ...options,
+                headers: {
+                    ...(options.headers || {}),
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            if (response.status === 401) {
+                goToLogin();
+                return new Promise(() => {});
+            }
+
+            return response;
+        }
+
+        // Runs an authFetch() call and parses its JSON body, converting a
+        // network/connection failure into the same {success, message} shape
+        // every real server response already uses - so callers only ever
+        // need to handle one case instead of a try/catch on top of every
+        // button handler.
+        async function submitAction(path, options) {
+            try {
+                const response = await authFetch(path, options);
+                return await response.json();
+            } catch (error) {
+                return { success: false, message: 'Cannot connect to the server. Please try again.' };
+            }
+        }
+
+        // Every route this dashboard talks to returns {success, message} -
+        // on success AND on failure - so one tiny helper covers all of them.
+        function showResult(data) {
+            alert((data && data.message) ? data.message : 'Something went wrong.');
+        }
+
+        // =================================================================
+        // SIDEBAR NAVIGATION (unchanged)
+        // =================================================================
+        const sidebarNav = document.getElementById('sidebar-nav');
+        const mainTitle = document.getElementById('main-title');
+        const sectionContainers = document.querySelectorAll('.section-container');
+
+        sidebarNav.addEventListener('click', (e) => {
+            const clickedLink = e.target.closest('li');
+            if (!clickedLink) return;
+
+            sidebarNav.querySelectorAll('li').forEach(li => li.classList.remove('active'));
+            clickedLink.classList.add('active');
+
+            sectionContainers.forEach(container => container.style.display = 'none');
+            const targetSectionId = clickedLink.dataset.section;
+            document.getElementById(targetSectionId).style.display = 'block';
+
+            mainTitle.innerText = clickedLink.innerText;
+
+            if (targetSectionId === 'section-security-logs') {
+                fetchLogs();
+            }
+        });
+
+        // =================================================================
+        // SECURITY LOGS
+        // =================================================================
+        async function fetchLogs() {
+            const tableBody = document.getElementById('logsTableBody');
+            try {
+                const response = await authFetch('/api/admin/logs');
+                const data = await response.json();
+
+                if (data.success) {
+                    tableBody.innerHTML = '';
+                    data.logs.forEach(log => {
+                        let badgeClass = 'bg-info';
+                        if (log.event_type.includes('SUCCESS') || log.description.includes('ALLOW')) badgeClass = 'bg-success';
+                        else if (log.event_type.includes('FAILED') || log.description.includes('THROTTLE')) badgeClass = 'bg-warning';
+                        else if (log.description.includes('BLOCK')) badgeClass = 'bg-danger';
+
+                        tableBody.innerHTML += `
+                            <tr>
+                                <td style="color: #888;">${escapeHtml(log.formatted_time)}</td>
+                                <td><strong>${escapeHtml(log.user_email)}</strong></td>
+                                <td><span class="badge ${badgeClass}">${escapeHtml(log.event_type)}</span></td>
+                                <td>${escapeHtml(log.description)}</td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    tableBody.innerHTML = `<tr><td colspan="4" style="color: red;">${escapeHtml(data.message || 'Could not load logs.')}</td></tr>`;
+                }
+            } catch (error) {
+                tableBody.innerHTML = '<tr><td colspan="4" style="color: red;">Cannot connect to Database.</td></tr>';
+            }
+        }
+        window.onload = fetchLogs;
+
+        // =================================================================
+        // STUDENT RECORDS CRUD
+        // =================================================================
+        const studentsTableBody = document.getElementById('studentsTableBody');
+
+        function studentRowHtml({ studentId, fullName, department, program, yearLevel, status }) {
+            return `
+                <td><strong>${escapeHtml(studentId)}</strong></td>
+                <td>${escapeHtml(fullName)}</td>
+                <td>${escapeHtml(department)}</td>
+                <td>${escapeHtml(program)}</td>
+                <td>${escapeHtml(yearLevel)}</td>
+                <td><span class="badge bg-success">${escapeHtml(status)}</span></td>
+                <td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td>
+            `;
+        }
+
+        document.getElementById('btnAddStudent').addEventListener('click', async () => {
+            const studentId = prompt('Student ID (e.g. A23-00001):');
+            if (studentId === null) return;
+            if (!studentId.trim()) { alert('Student ID is required.'); return; }
+
+            const fullName = prompt('Full Name:');
+            if (fullName === null) return;
+            if (!fullName.trim()) { alert('Full Name is required.'); return; }
+
+            const department = prompt('Department (e.g. CCMS):', '') || '';
+            const program = prompt('Program (e.g. BSCS - SoftEng):', '') || '';
+            const yearLevel = prompt('Year Level (e.g. 1st Year):', '') || '';
+
+            // Hits the placeholder POST /api/students route added in
+            // server.js, gated by authMiddleware -> requireRole('admin') ->
+            // securityMiddleware, same as every other action below.
+            const data = await submitAction('/api/students', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ studentId, fullName, department, program, yearLevel })
+            });
+            showResult(data);
+            if (!data.success) return;
+
+            // The endpoint is a placeholder (no Student table exists yet -
+            // see server.js), so there is nothing to re-fetch from. This
+            // appends the row locally so the UI still feels responsive; it
+            // will not survive a page reload until real persistence exists.
+            const row = document.createElement('tr');
+            row.dataset.id = studentId;
+            row.innerHTML = studentRowHtml({ studentId, fullName, department, program, yearLevel, status: 'ENROLLED' });
+            studentsTableBody.appendChild(row);
+        });
+
+        // One delegated listener handles every row's Edit/Remove buttons -
+        // including rows added after page load - the same pattern the
+        // sidebar nav above already uses.
+        studentsTableBody.addEventListener('click', async (e) => {
+            const btn = e.target.closest('button[data-action]');
+            if (!btn) return;
+
+            const row = btn.closest('tr');
+            const id = row.dataset.id;
+            const cells = row.children;
+
+            if (btn.dataset.action === 'edit') {
+                const fullName = prompt('Full Name:', cells[1].innerText);
+                if (fullName === null) return;
+                const department = prompt('Department:', cells[2].innerText);
+                if (department === null) return;
+                const program = prompt('Program:', cells[3].innerText);
+                if (program === null) return;
+                const yearLevel = prompt('Year Level:', cells[4].innerText);
+                if (yearLevel === null) return;
+
+                const data = await submitAction(`/api/students/${encodeURIComponent(id)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fullName, department, program, yearLevel })
+                });
+                showResult(data);
+                if (!data.success) return;
+
+                cells[1].innerText = fullName;
+                cells[2].innerText = department;
+                cells[3].innerText = program;
+                cells[4].innerText = yearLevel;
+
+            } else if (btn.dataset.action === 'remove') {
+                if (!confirm('Are you sure you want to delete this record?')) return;
+
+                const data = await submitAction(`/api/students/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                showResult(data);
+                if (data.success) row.remove();
+            }
+        });
+
+        // =================================================================
+        // SUBJECT MANAGEMENT CRUD (mirrors Student Records above exactly)
+        // =================================================================
+        const subjectsTableBody = document.getElementById('subjectsTableBody');
+
+        function subjectRowHtml({ subjectCode, subjectTitle, units, department }) {
+            return `
+                <td><strong>${escapeHtml(subjectCode)}</strong></td>
+                <td>${escapeHtml(subjectTitle)}</td>
+                <td>${escapeHtml(units)}</td>
+                <td>${escapeHtml(department)}</td>
+                <td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td>
+            `;
+        }
+
+        document.getElementById('btnAddSubject').addEventListener('click', async () => {
+            const subjectCode = prompt('Subject Code (e.g. SE301):');
+            if (subjectCode === null) return;
+            if (!subjectCode.trim()) { alert('Subject Code is required.'); return; }
+
+            const subjectTitle = prompt('Subject Title:');
+            if (subjectTitle === null) return;
+            if (!subjectTitle.trim()) { alert('Subject Title is required.'); return; }
+
+            const units = prompt('Units:', '3') || '';
+            const department = prompt('Department (e.g. CCMS):', '') || '';
+
+            const data = await submitAction('/api/subjects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subjectCode, subjectTitle, units, department })
+            });
+            showResult(data);
+            if (!data.success) return;
+
+            const row = document.createElement('tr');
+            row.dataset.id = subjectCode;
+            row.innerHTML = subjectRowHtml({ subjectCode, subjectTitle, units, department });
+            subjectsTableBody.appendChild(row);
+        });
+
+        subjectsTableBody.addEventListener('click', async (e) => {
+            const btn = e.target.closest('button[data-action]');
+            if (!btn) return;
+
+            const row = btn.closest('tr');
+            const id = row.dataset.id;
+            const cells = row.children;
+
+            if (btn.dataset.action === 'edit') {
+                const subjectTitle = prompt('Subject Title:', cells[1].innerText);
+                if (subjectTitle === null) return;
+                const units = prompt('Units:', cells[2].innerText);
+                if (units === null) return;
+                const department = prompt('Department:', cells[3].innerText);
+                if (department === null) return;
+
+                const data = await submitAction(`/api/subjects/${encodeURIComponent(id)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ subjectTitle, units, department })
+                });
+                showResult(data);
+                if (!data.success) return;
+
+                cells[1].innerText = subjectTitle;
+                cells[2].innerText = units;
+                cells[3].innerText = department;
+
+            } else if (btn.dataset.action === 'remove') {
+                if (!confirm('Are you sure you want to delete this record?')) return;
+
+                const data = await submitAction(`/api/subjects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                showResult(data);
+                if (data.success) row.remove();
+            }
+        });
+    </script>
+</body>
+</html>

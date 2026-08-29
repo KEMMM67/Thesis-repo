@@ -1,0 +1,135 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "library"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  student
+  faculty
+  admin
+}
+
+enum LoginStatus {
+  SUCCESS
+  FAILED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ActionTaken {
+  ALLOW
+  LOG
+  THROTTLE
+  BLOCK
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  role         Role
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  loginAttempts   LoginAttempt[]
+  anomalyScores   AnomalyScore[]
+  securityActions SecurityAction[]
+  behaviorLogs    BehaviorLog[]
+  sessions        Session[]
+
+  @@map("users")
+}
+
+model LoginAttempt {
+  id          Int          @id @default(autoincrement())
+  userEmail   String       @map("user_email") @db.VarChar(255)
+  userId      Int?         @map("user_id")
+  user        User?        @relation(fields: [userId], references: [id])
+  ipAddress   String       @map("ip_address") @db.VarChar(45)
+  status      LoginStatus?
+  attemptTime DateTime     @default(now()) @map("attempt_time")
+
+  @@index([userId])
+  @@index([attemptTime])
+  @@index([userEmail])
+  @@map("login_attempts")
+}
+
+model AnomalyScore {
+  id           Int        @id @default(autoincrement())
+  userEmail    String     @map("user_email") @db.VarChar(255)
+  userId       Int?       @map("user_id")
+  user         User?      @relation(fields: [userId], references: [id])
+  score        Decimal    @db.Decimal(5, 2)
+  riskLevel    RiskLevel? @map("risk_level")
+  calculatedAt DateTime   @default(now()) @map("calculated_at")
+
+  @@index([userId])
+  @@index([calculatedAt])
+  @@map("anomaly_scores")
+}
+
+model SecurityAction {
+  id          Int          @id @default(autoincrement())
+  userEmail   String       @map("user_email") @db.VarChar(255)
+  userId      Int?         @map("user_id")
+  user        User?        @relation(fields: [userId], references: [id])
+  actionTaken ActionTaken? @map("action_taken")
+  reason      String?
+  actionTime  DateTime     @default(now()) @map("action_time")
+
+  @@index([userId])
+  @@index([actionTime])
+  @@map("security_actions")
+}
+
+model BehaviorLog {
+  id          Int      @id @default(autoincrement())
+  userEmail   String?  @map("user_email") @db.VarChar(255)
+  userId      Int?     @map("user_id")
+  user        User?    @relation(fields: [userId], references: [id])
+  eventType   String   @map("event_type") @db.VarChar(100)
+  description String?
+  logTime     DateTime @default(now()) @map("log_time")
+
+  @@index([userId])
+  @@index([logTime])
+  @@map("behavior_logs")
+}
+
+model Session {
+  id           Int      @id @default(autoincrement())
+  userId       Int?     @map("user_id")
+  user         User?    @relation(fields: [userId], references: [id])
+  sessionToken String   @unique @map("session_token") @db.VarChar(255)
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model IpTracking {
+  id            Int       @id @default(autoincrement())
+  ipAddress     String    @unique @map("ip_address") @db.VarChar(45)
+  totalRequests Int       @default(0) @map("total_requests")
+  isBlocked     Boolean   @default(false) @map("is_blocked")
+  blockedUntil  DateTime? @map("blocked_until")
+  lastSeen      DateTime  @default(now()) @map("last_seen")
+
+  @@map("ip_tracking")
+}
