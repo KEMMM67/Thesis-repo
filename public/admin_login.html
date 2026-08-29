@@ -3,26 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Login | SIS</title>
+    <title>System Administrator Login | SIS</title>
     <link rel="stylesheet" href="style.css">
 </head>
-<body class="login-body" data-portal="student">
+<body class="login-body" data-portal="admin">
 
     <div class="login-card">
         <div class="top-red-bar"></div>
 
         <div class="card-content">
             <svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 3L4 6V11C4 15.5 7.2 19.7 12 21C16.8 19.7 20 15.5 20 11V6L12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-                <path d="M9 12L11 14L15.5 9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M12 2L4 5V10C4 15 7.5 19.5 12 21C16.5 19.5 20 15 20 10V5L12 2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                <path d="M12 7.5V13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                <circle cx="12" cy="16.2" r="0.9" fill="currentColor"/>
             </svg>
             <h2 class="sys-title">STUDENT INFORMATION SYSTEM</h2>
-            <h3 class="login-header">Student Login</h3>
+            <h3 class="login-header">System Administrator Login</h3>
 
             <form id="loginForm">
                 <div class="input-group">
-                    <label for="email">Email Address</label>
-                    <input type="email" id="email" placeholder="Enter your email address" required>
+                    <label for="email">Admin Email Address</label>
+                    <input type="email" id="email" placeholder="Enter your administrator email" required>
                 </div>
 
                 <div class="input-group">
@@ -35,14 +36,13 @@
                 <div id="loginMessage" class="login-message" style="display: none;"></div>
             </form>
 
-            <p class="signup-text">Don't have an account? <a href="signup.html">Sign Up as Student</a></p>
+            <p class="signup-text"><a href="/">&larr; Back to Student Login</a></p>
 
             <div class="test-accounts-section">
-                <p class="test-title">Test Account</p>
-                <p>Student: student@example.edu.ph / student123</p>
+                <p class="test-title">Restricted Access</p>
+                <p>This portal is reserved for authorized system administrators.</p>
+                <p>Admin (test): admin@example.edu.ph / admin123</p>
             </div>
-
-            <p class="signup-text" style="margin-top: 16px;">Administrator? <a href="/admin">Go to Admin Portal</a></p>
         </div>
     </div>
 

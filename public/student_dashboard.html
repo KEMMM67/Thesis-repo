@@ -4,111 +4,166 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Student Portal | SIS</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="dashboard-body">
 
     <div class="topbar">
-        <div class="logo">STUDENT INFORMATION SYSTEM</div>
+        <div class="logo"><i class="fa-solid fa-graduation-cap"></i> STUDENT INFORMATION SYSTEM</div>
         <div class="user-info">
-            <span>Welcome, Khynne Mark Elmer</span>
-            <a href="#">My Profile</a>
-            <a href="index.html">Logout</a>
+            <span class="user-chip"><i class="fa-solid fa-user-graduate"></i> Khynne Mark Elmer <span class="role-tag">STUDENT</span></span>
+            <a href="index.html"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
         </div>
     </div>
 
     <div class="wrapper">
         <div class="sidebar">
             <ul id="sidebar-nav">
-                <li class="active" data-section="section-dashboard">My Dashboard</li>
-                <li data-section="section-my-grades">My Grades</li>
-                <li data-section="section-statement-of-account">Statement of Account</li>
-                <li data-section="section-enrollment-subject">Enrollment Subject</li>
-                <li data-section="section-clearance-status">Clearance Status</li>
+                <li class="active" data-section="section-profile"><i class="nav-icon fa-solid fa-id-card"></i><span class="nav-label">My Profile</span></li>
+                <li data-section="section-schedule"><i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-label">Class Schedule</span></li>
+                <li data-section="section-grades"><i class="nav-icon fa-solid fa-chart-line"></i><span class="nav-label">Grades Evaluation</span></li>
+                <li data-section="section-billing"><i class="nav-icon fa-solid fa-file-invoice-dollar"></i><span class="nav-label">Account/Billing Assessment</span></li>
+                <li data-section="section-clearance"><i class="nav-icon fa-solid fa-circle-check"></i><span class="nav-label">Clearance Status</span></li>
             </ul>
         </div>
 
         <div class="content" id="main-content">
-            <h1 id="main-title">Student Dashboard</h1>
+            <h1 id="main-title">My Profile</h1>
 
-            <div class="section-container" id="section-dashboard" style="display: block;">
-                <div class="cards-container">
-                    <div class="card"><h3>Enrolled Subjects</h3><div class="value">8</div></div>
-                    <div class="card"><h3>Total Units</h3><div class="value">24</div></div>
-                    <div class="card"><h3>Current GWA</h3><div class="value">1.15</div></div>
-                    <div class="card"><h3>Outstanding Balance</h3><div class="value">₱0.00</div></div>
+            <div class="section-container" id="section-profile" style="display: block;">
+                <div class="profile-header">
+                    <div class="profile-avatar"><i class="fa-solid fa-user-graduate"></i></div>
+                    <div class="profile-heading">
+                        <h2>LAWAN, Khynne Mark Elmer</h2>
+                        <p class="text-muted">Student ID: A23-00001 &middot; BSCS - Software Engineering &middot; 3rd Year</p>
+                        <span class="badge bg-success">ENROLLED</span>
+                    </div>
                 </div>
-                <h2>Today's Class Schedule</h2>
-                <ul class="sched-list">
-                    <li>
-                        <div><strong>SE301: Software Engineering 1</strong> <br> <span class="room">CCMS Lab 3 | Prof. Cruz</span></div>
-                        <div>08:00 AM - 11:00 AM</div>
-                    </li>
-                    <li>
-                        <div><strong>IAS301: Information Assurance & Security</strong> <br> <span class="room">CCMS Lec Rm 2 | Prof. Santos</span></div>
-                        <div>01:00 PM - 03:00 PM</div>
-                    </li>
-                    <li>
-                        <div><strong>HCI101: Human-Computer Interaction</strong> <br> <span class="room">CCMS Lab 1 | Prof. Mendoza</span></div>
-                        <div>03:30 PM - 05:30 PM</div>
-                    </li>
-                </ul>
+
+                <div class="cards-container">
+                    <div class="card card--stat">
+                        <div class="card-icon"><i class="fa-solid fa-book-open"></i></div>
+                        <div class="card-body"><h3>Enrolled Units</h3><div class="value">24</div></div>
+                    </div>
+                    <div class="card card--stat">
+                        <div class="card-icon"><i class="fa-solid fa-chart-line"></i></div>
+                        <div class="card-body"><h3>Current GWA</h3><div class="value">1.15</div></div>
+                    </div>
+                    <div class="card card--stat">
+                        <div class="card-icon"><i class="fa-solid fa-wallet"></i></div>
+                        <div class="card-body"><h3>Outstanding Balance</h3><div class="value">₱0.00</div></div>
+                    </div>
+                    <div class="card card--stat">
+                        <div class="card-icon card-icon--success"><i class="fa-solid fa-circle-check"></i></div>
+                        <div class="card-body"><h3>Clearance</h3><div class="value">Cleared</div></div>
+                    </div>
+                </div>
+
+                <h2>Personal Information</h2>
+                <table>
+                    <tbody>
+                        <tr><td><strong>Full Name</strong></td><td>LAWAN, Khynne Mark Elmer</td></tr>
+                        <tr><td><strong>Student ID</strong></td><td>A23-00001</td></tr>
+                        <tr><td><strong>Program</strong></td><td>BSCS - Software Engineering</td></tr>
+                        <tr><td><strong>Year Level</strong></td><td>3rd Year</td></tr>
+                        <tr><td><strong>Department</strong></td><td>College of Computing and Multimedia Studies (CCMS)</td></tr>
+                        <tr><td><strong>Email Address</strong></td><td>student@example.edu.ph</td></tr>
+                        <tr><td><strong>Contact Number</strong></td><td>+63 9XX XXX XXXX</td></tr>
+                        <tr><td><strong>Home Address</strong></td><td>Lucena City, Quezon Province</td></tr>
+                    </tbody>
+                </table>
             </div>
 
-            <div class="section-container" id="section-my-grades">
-                <h2>My Grades (3rd Year, 1st Semester)</h2>
+            <div class="section-container" id="section-schedule">
+                <h2>Class Schedule (1st Semester, 2025-2026)</h2>
+                <table>
+                    <thead>
+                        <tr><th>Subject Code</th><th>Description</th><th>Units</th><th>Day / Time</th><th>Room</th><th>Instructor</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>SE301</strong></td><td>Software Engineering 1</td><td>3</td><td>Mon / Wed &middot; 08:00 AM - 09:30 AM</td><td>CCMS Lab 3</td><td>Prof. Cruz</td></tr>
+                        <tr><td><strong>IAS301</strong></td><td>Information Assurance &amp; Security</td><td>3</td><td>Tue / Thu &middot; 01:00 PM - 02:30 PM</td><td>CCMS Lec Rm 2</td><td>Prof. Santos</td></tr>
+                        <tr><td><strong>HCI101</strong></td><td>Human-Computer Interaction</td><td>3</td><td>Friday &middot; 03:30 PM - 06:30 PM</td><td>CCMS Lab 1</td><td>Prof. Mendoza</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="section-container" id="section-grades">
+                <h2>Grades Evaluation</h2>
+                <div class="cards-container">
+                    <div class="card card--stat">
+                        <div class="card-icon"><i class="fa-solid fa-award"></i></div>
+                        <div class="card-body"><h3>General Weighted Average</h3><div class="value">1.15</div></div>
+                    </div>
+                    <div class="card card--stat">
+                        <div class="card-icon card-icon--success"><i class="fa-solid fa-circle-check"></i></div>
+                        <div class="card-body"><h3>Academic Standing</h3><div class="value">Good Standing</div></div>
+                    </div>
+                </div>
+
                 <div class="filter-bar">
                     <select>
                         <option>1st Semester, 2025-2026</option>
                     </select>
-                    <button>Print Report</button>
+                    <button><i class="fa-solid fa-print"></i> Print Report</button>
                 </div>
                 <table>
                     <thead>
                         <tr><th>Subject Code</th><th>Subject Title</th><th>Units</th><th>Grade</th><th>Remarks</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>SE301</td><td>Software Engineering 1</td><td>3</td><td>1.25</td><td>Passed</td></tr>
-                        <tr><td>IAS301</td><td>Information Assurance & Security</td><td>3</td><td>1.00</td><td>Passed</td></tr>
-                        <tr><td>HCI101</td><td>Human-Computer Interaction</td><td>3</td><td>1.50</td><td>Passed</td></tr>
+                        <tr><td><strong>SE301</strong></td><td>Software Engineering 1</td><td>3</td><td>1.25</td><td><span class="badge bg-success">Passed</span></td></tr>
+                        <tr><td><strong>IAS301</strong></td><td>Information Assurance &amp; Security</td><td>3</td><td>1.00</td><td><span class="badge bg-success">Passed</span></td></tr>
+                        <tr><td><strong>HCI101</strong></td><td>Human-Computer Interaction</td><td>3</td><td>1.50</td><td><span class="badge bg-success">Passed</span></td></tr>
                     </tbody>
                 </table>
             </div>
 
-            <div class="section-container" id="section-statement-of-account">
-                <h2>Statement of Account</h2>
-                <div class="card card--success" style="margin-bottom: 20px;">
+            <div class="section-container" id="section-billing">
+                <h2>Account / Billing Assessment</h2>
+                <div class="card card--success" style="margin-bottom: 24px;">
                     <h3>Total Balance Due</h3>
                     <div class="value">₱0.00</div>
-                    <p class="status-positive">✔ Paid in Full</p>
+                    <p class="status-positive"><i class="fa-solid fa-circle-check"></i> Paid in Full</p>
                 </div>
-                <h3>Payment History</h3>
+
+                <h3>Assessment of Fees (1st Semester, 2025-2026)</h3>
+                <table>
+                    <thead>
+                        <tr><th>Fee Type</th><th>Amount (₱)</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Tuition Fee</td><td>15,000.00</td></tr>
+                        <tr><td>Miscellaneous Fee</td><td>2,500.00</td></tr>
+                        <tr><td>Laboratory Fee</td><td>1,000.00</td></tr>
+                        <tr><td><strong>Total Assessment</strong></td><td><strong>18,500.00</strong></td></tr>
+                    </tbody>
+                </table>
+
+                <h3 style="margin-top: 24px;">Payment History</h3>
                 <table>
                     <thead>
                         <tr><th>Date</th><th>OR Number</th><th>Amount (₱)</th><th>Description</th></tr>
                     </thead>
                     <tbody>
-                        <tr><td>2026-03-01</td><td>OR-00192</td><td>18,500.00</td><td>Full Tuition</td></tr>
+                        <tr><td>2026-03-01</td><td>OR-00192</td><td>18,500.00</td><td>Full Tuition Payment</td></tr>
                     </tbody>
                 </table>
             </div>
 
-            <div class="section-container" id="section-enrollment-subject">
-                <h2>Enrollment Module</h2>
-                <p class="text-muted" style="margin-bottom: 20px;">The enrollment period for the next semester is currently closed.</p>
-                <button class="btn-secondary" disabled>Proceed to Enrollment</button>
-            </div>
-
-            <div class="section-container" id="section-clearance-status">
+            <div class="section-container" id="section-clearance">
                 <h2>Clearance Status</h2>
                 <table>
                     <thead>
-                        <tr><th>Requirement</th><th>Department</th><th>Status</th></tr>
+                        <tr><th>Requirement</th><th>Office</th><th>Status</th></tr>
                     </thead>
                     <tbody>
                         <tr><td>Library Clearance</td><td>MSEUF Main Library</td><td><span class="badge bg-success">Cleared</span></td></tr>
-                        <tr><td>Guidance clearance</td><td>Guidance Office</td><td><span class="badge bg-success">Cleared</span></td></tr>
-                        <tr><td>Departmental clearance</td><td>CCMS Dean's Office</td><td><span class="badge bg-success">Cleared</span></td></tr>
+                        <tr><td>Guidance Clearance</td><td>Guidance Office</td><td><span class="badge bg-success">Cleared</span></td></tr>
+                        <tr><td>Departmental Clearance</td><td>CCMS Dean's Office</td><td><span class="badge bg-success">Cleared</span></td></tr>
+                        <tr><td>Accounting Clearance</td><td>Cashier / Accounting Office</td><td><span class="badge bg-success">Cleared</span></td></tr>
+                        <tr><td>Student Affairs Clearance</td><td>Office of Student Affairs</td><td><span class="badge bg-success">Cleared</span></td></tr>
                     </tbody>
                 </table>
             </div>

@@ -32,6 +32,13 @@ function showMessage(text, type) {
     messageBox.style.display = "block";
 }
 
+// This one script is shared by both login pages (index.html and
+// admin_login.html both load it via <script src="script.js">). Each
+// page's <body data-portal="student|admin"> declares which audience it's
+// for, so the same submit handler below can enforce that boundary
+// without needing two near-duplicate copies of this file.
+const expectedPortal = document.body.dataset.portal;
+
 // Intercepts the form submission to inject security protocols
 loginForm.addEventListener('submit', async function(event) {
     event.preventDefault();
@@ -63,6 +70,23 @@ loginForm.addEventListener('submit', async function(event) {
         const data = await response.json();
 
         if (response.ok) {
+            // The credentials were valid, but that alone isn't enough here:
+            // check the role the *server* returned against the role this
+            // specific page promised. Without this, "separate portals" would
+            // only be skin-deep — a student's real credentials would still
+            // quietly work on the admin login form. Mirrors the same
+            // admin-vs-everyone-else bucketing the redirect below already
+            // uses, so an unrecognized non-admin role still lands correctly
+            // on the student portal instead of being falsely rejected.
+            if (expectedPortal === 'admin' && data.role !== 'admin') {
+                showMessage("This portal is for administrators only. Please use the correct login page for your account.", "error");
+                return;
+            }
+            if (expectedPortal === 'student' && data.role === 'admin') {
+                showMessage("This portal is for students only. Please use the Admin Portal to sign in.", "error");
+                return;
+            }
+
             // Persist the verified session. Every future authenticated request
             // reads this back out and sends it as Authorization: Bearer <token> —
             // nothing about identity is ever inferred from a header again.
@@ -71,11 +95,10 @@ loginForm.addEventListener('submit', async function(event) {
 
             showMessage("SUCCESS: " + data.message, "success");
             setTimeout(() => {
-                if (data.role === 'admin') {
-                    window.location.href = "admin_dashboard.html";
-                } else {
-                    window.location.href = "student_dashboard.html";
-                }
+                // Still driven by the server's own role claim, not by which
+                // page hosted the form — the portal check above only decides
+                // whether to proceed at all; it never picks the destination.
+                window.location.href = (data.role === 'admin') ? "admin_dashboard.html" : "student_dashboard.html";
             }, 1000);
 
         } else if (response.status === 401) {

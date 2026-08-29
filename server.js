@@ -4,6 +4,8 @@ import helmet from "helmet";
 import cors from "cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import path from "path";
+import { fileURLToPath } from "url";
 import { securityMiddleware } from "./middleware/securityMiddleware.js";
 import { authMiddleware, requireRole } from "./middleware/authMiddleware.js";
 import prisma from "./config/prisma.js";
@@ -35,8 +37,46 @@ app.use((req, res, next) => {
     next();
 });
 
-// Serve static frontend files (HTML, CSS, JS) from the 'public' directory
-app.use(express.static('public', { index: 'compare.html' }));
+// Absolute path to the public/ directory, resolved from this file's own
+// location rather than the bare relative string 'public'. A relative
+// path is resolved against the process's current working directory at
+// launch time, not against where server.js actually lives - if the
+// server is ever started from a different cwd, that can silently point
+// static serving somewhere else entirely (worst case, the project root,
+// exposing server.js, prisma/, core/, and middleware/). An absolute path
+// removes that whole class of risk regardless of how or from where the
+// process is launched.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+// GET /: explicit route for the site root, registered before the static
+// middleware below so it always wins for this exact path - the Student
+// Login Portal is never left to chance, an index-option default, or
+// (if that file were ever briefly missing) any implicit fallback.
+app.get('/', (req, res) => {
+    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
+
+// GET /admin: dedicated entry point for the separate Admin Portal, so
+// administrators have a clean, memorable URL instead of needing to know
+// the exact admin_login.html filename. Intentionally unauthenticated -
+// like every other login page, viewing the form itself requires no
+// token; only the API calls it makes are gated by auth/security
+// middleware.
+app.get('/admin', (req, res) => {
+    res.sendFile(path.join(PUBLIC_DIR, 'admin_login.html'));
+});
+
+// Serve the remaining static frontend assets (CSS, JS, and other pages
+// like signup.html) from public/ ONLY - never the project root.
+// index: false explicitly disables express.static's own directory-index
+// behavior. With the two explicit routes above already covering '/' and
+// '/admin', static serving has no need to auto-resolve a bare directory
+// to a file, and turning that off outright means there is no code path
+// left anywhere in this file that could ever produce a directory
+// listing for any path.
+app.use(express.static(PUBLIC_DIR, { index: false }));
 
 // Formats a Date exactly like the old TO_CHAR(log_time, 'YYYY-MM-DD HH12:MI:SS AM')
 function formatLogTime(date) {
@@ -95,7 +135,7 @@ app.post("/api/login", securityMiddleware, async (req, res) => {
                         data: { userEmail: email, userId: user?.id ?? null, eventType: 'LOGIN_FAILED', description: 'Invalid password attempted.' }
                     })
                 ]);
-            } catch (logErr) {
+             } catch (logErr) {
                 console.error("Audit log write failed on failed login:", logErr.message);
             }
 
