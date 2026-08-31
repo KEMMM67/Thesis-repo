@@ -14,11 +14,69 @@ async function upsertTestUser(email, plainPassword, role) {
   });
 }
 
+// Same rows the admin dashboard used to hardcode as static <tr>
+// markup (public/admin_dashboard.html, before Priority: "Modern UI
+// Modals" replaced it with a real GET /api/students-backed table) -
+// upserted here so the migration to real persistence doesn't look like
+// data loss on first load.
+const STUDENT_SEED = [
+  { studentId: 'A23-00001', fullName: 'LAWAN, KHYNNE MARK ELMER', department: 'CCMS', program: 'BSCS - SoftEng', yearLevel: '3rd Year', status: 'ENROLLED' },
+  { studentId: 'A23-00002', fullName: 'DELEÑA, KENJIE', department: 'CCMS', program: 'BSCS - SoftEng', yearLevel: '3rd Year', status: 'ENROLLED' },
+  { studentId: 'A23-00003', fullName: 'LABSO, JOHN ELON', department: 'CCMS', program: 'BSCS - SoftEng', yearLevel: '3rd Year', status: 'ENROLLED' },
+  { studentId: 'B24-10521', fullName: 'MENDOZA, MARIA CLARA', department: 'CAS', program: 'BS Psychology', yearLevel: '2nd Year', status: 'ENROLLED' },
+  { studentId: 'C22-44122', fullName: 'SANTOS, JUAN DELA CRUZ', department: 'CENG', program: 'BS Civil Eng', yearLevel: '4th Year', status: 'IRREGULAR' },
+  { studentId: 'D25-99211', fullName: 'REYES, ANA MARIE', department: 'CIHTM', program: 'BS Tourism', yearLevel: '1st Year', status: 'ENROLLED' },
+  { studentId: 'E23-33291', fullName: 'GARCIA, MARK ANTHONY', department: 'CCJS', program: 'BS Criminology', yearLevel: '3rd Year', status: 'ENROLLED' },
+  { studentId: 'F24-88124', fullName: 'FLORES, SAMANTHA', department: 'CNAHS', program: 'BS Nursing', yearLevel: '2nd Year', status: 'ENROLLED' },
+  { studentId: 'G22-77451', fullName: 'CRUZ, JOSHUA', department: 'CED', program: 'BSEd Mathematics', yearLevel: '4th Year', status: 'ENROLLED' },
+  { studentId: 'H25-11094', fullName: 'BAUTISTA, CHLOE', department: 'CCMS', program: 'BS Info Tech', yearLevel: '1st Year', status: 'DROPPED' },
+];
+
+const SUBJECT_SEED = [
+  { subjectCode: 'SE301', subjectTitle: 'Software Engineering 1', units: 3, department: 'CCMS' },
+  { subjectCode: 'IAS301', subjectTitle: 'Information Assurance and Security', units: 3, department: 'CCMS' },
+  { subjectCode: 'HCI101', subjectTitle: 'Human-Computer Interaction', units: 3, department: 'CCMS' },
+];
+
+// Matches the grades student_dashboard.html's Grades Evaluation section
+// used to hardcode for the same student.
+const GRADE_SEED = [
+  { studentId: 'A23-00001', subjectCode: 'SE301', term: '1st Semester, 2025-2026', grade: 1.25, remarks: 'Passed' },
+  { studentId: 'A23-00001', subjectCode: 'IAS301', term: '1st Semester, 2025-2026', grade: 1.00, remarks: 'Passed' },
+  { studentId: 'A23-00001', subjectCode: 'HCI101', term: '1st Semester, 2025-2026', grade: 1.50, remarks: 'Passed' },
+];
+
+async function seedAcademicRecords() {
+  const students = await Promise.all(
+    STUDENT_SEED.map((s) => prisma.student.upsert({ where: { studentId: s.studentId }, update: s, create: s }))
+  );
+  const subjects = await Promise.all(
+    SUBJECT_SEED.map((s) => prisma.subject.upsert({ where: { subjectCode: s.subjectCode }, update: s, create: s }))
+  );
+
+  const studentByCode = Object.fromEntries(students.map((s) => [s.studentId, s]));
+  const subjectByCode = Object.fromEntries(subjects.map((s) => [s.subjectCode, s]));
+
+  for (const g of GRADE_SEED) {
+    const student = studentByCode[g.studentId];
+    const subject = subjectByCode[g.subjectCode];
+    await prisma.grade.upsert({
+      where: { studentId_subjectId_term: { studentId: student.id, subjectId: subject.id, term: g.term } },
+      update: { grade: g.grade, remarks: g.remarks },
+      create: { studentId: student.id, subjectId: subject.id, term: g.term, grade: g.grade, remarks: g.remarks },
+    });
+  }
+
+  console.log(`Seeded ${students.length} students, ${subjects.length} subjects, ${GRADE_SEED.length} grades.`);
+}
+
 async function main() {
   const admin = await upsertTestUser('admin@example.edu.ph', 'admin123', 'admin');
   const student = await upsertTestUser('student@example.edu.ph', 'student123', 'student');
 
   console.log(`Seeded users: ${admin.email} (${admin.role}), ${student.email} (${student.role})`);
+
+  await seedAcademicRecords();
 
   await prisma.loginAttempt.createMany({
     data: [

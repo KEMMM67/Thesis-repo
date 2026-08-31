@@ -708,6 +708,125 @@ tbody tr:last-child td { border-bottom: none; }
     height: 260px;
 }
 
+/* ---- Topbar account dropdown (admin_dashboard.html) ---- */
+.account-menu { position: relative; }
+.account-menu__trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 50%;
+    color: var(--color-text-secondary);
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+.account-menu__trigger:hover,
+.account-menu__trigger[aria-expanded="true"] {
+    background-color: var(--color-primary-soft);
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+}
+.account-menu__panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 190px;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    padding: 6px;
+    z-index: 20;
+}
+.account-menu__item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-sans);
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+.account-menu__item:hover { background-color: var(--color-bg); color: var(--color-text); }
+.account-menu__item i { width: 16px; text-align: center; color: var(--color-text-muted); }
+
+/* ---- Modal dialogs (Add/Edit Student, Add/Edit Subject, Create Admin) ----
+   Native <dialog>, shown via .showModal() in admin_dashboard.js: that
+   call is what provides the centered position, ::backdrop overlay,
+   inert background, focus trap, and ESC-to-close - none of it is
+   custom CSS/JS, it's the platform. This block only styles the card
+   itself; form fields inside reuse .input-group / .req / <small> from
+   the login page (Section 1 above) rather than redefining them. */
+dialog.app-modal {
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    width: 440px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 64px);
+    overflow: auto;
+    color: var(--color-text);
+}
+dialog.app-modal::backdrop {
+    background: rgba(20, 21, 26, 0.55);
+}
+.app-modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--color-border);
+}
+.app-modal__header h2 { font-size: 17px; font-weight: 700; margin: 0; color: var(--color-text); }
+.app-modal__close {
+    background: none;
+    border: none;
+    font-size: 22px;
+    line-height: 1;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+.app-modal__close:hover { background-color: var(--color-bg); color: var(--color-text); }
+.app-modal__body { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+.app-modal__body .input-group { margin-bottom: 0; }
+.app-modal__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 24px;
+    border-top: 1px solid var(--color-border);
+    background-color: var(--color-bg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    dialog.app-modal[open] { animation: modal-pop 0.15s var(--ease); }
+    dialog.app-modal[open]::backdrop { animation: modal-fade 0.15s var(--ease); }
+}
+@keyframes modal-pop {
+    from { opacity: 0; transform: scale(0.96) translateY(4px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes modal-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
 /* ---- Student profile header (student_dashboard.html "My Profile") ---- */
 .profile-header {
     display: flex;

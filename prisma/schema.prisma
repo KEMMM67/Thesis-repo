@@ -38,6 +38,12 @@ enum ActionTaken {
   BLOCK
 }
 
+enum StudentStatus {
+  ENROLLED
+  IRREGULAR
+  DROPPED
+}
+
 model User {
   id           Int      @id @default(autoincrement())
   email        String   @unique @db.VarChar(255)
@@ -132,4 +138,62 @@ model IpTracking {
   lastSeen      DateTime  @default(now()) @map("last_seen")
 
   @@map("ip_tracking")
+}
+
+// ---------------------------------------------------------------------
+// ACADEMIC RECORDS (basic models)
+// ---------------------------------------------------------------------
+// Deliberately NOT linked to User: the admin dashboard's Student
+// Records is a directory the registrar's office manages (student ID,
+// name, program, standing), which is a different concept from a
+// student's own login account - there is no signup flow today that
+// creates a matching Student row for a new User, and none is added
+// here. Linking the two (e.g. an optional Student.userId) is a
+// reasonable next step, not part of "basic" models.
+model Student {
+  id         Int           @id @default(autoincrement())
+  studentId  String        @unique @map("student_id") @db.VarChar(20)
+  fullName   String        @map("full_name") @db.VarChar(255)
+  department String        @default("") @db.VarChar(100)
+  program    String        @default("") @db.VarChar(150)
+  yearLevel  String        @default("") @map("year_level") @db.VarChar(50)
+  status     StudentStatus @default(ENROLLED)
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+
+  grades Grade[]
+
+  @@map("students")
+}
+
+model Subject {
+  id           Int      @id @default(autoincrement())
+  subjectCode  String   @unique @map("subject_code") @db.VarChar(20)
+  subjectTitle String   @map("subject_title") @db.VarChar(255)
+  units        Int      @default(3)
+  department   String   @default("") @db.VarChar(100)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  grades Grade[]
+
+  @@map("subjects")
+}
+
+model Grade {
+  id        Int      @id @default(autoincrement())
+  studentId Int      @map("student_id")
+  student   Student  @relation(fields: [studentId], references: [id])
+  subjectId Int      @map("subject_id")
+  subject   Subject  @relation(fields: [subjectId], references: [id])
+  term      String?  @db.VarChar(50)
+  grade     Decimal? @db.Decimal(3, 2)
+  remarks   String?  @db.VarChar(50)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([studentId, subjectId, term])
+  @@index([studentId])
+  @@index([subjectId])
+  @@map("grades")
 }

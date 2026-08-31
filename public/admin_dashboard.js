@@ -241,23 +241,171 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // studentId/subjectCode-keyed status->badge mapping, used only by
+    // renderStudentsTable() below.
+    function studentBadgeClass(status) {
+        if (status === 'DROPPED') return 'bg-danger';
+        if (status === 'IRREGULAR') return 'bg-warning';
+        return 'bg-success';
+    }
+
+    // Renders the WHOLE Student Records table from a students array -
+    // used both for the initial load and for every refresh after an
+    // Add/Edit (see loadStudents() and the STUDENT RECORDS section
+    // below). One render function for both cases, rather than a
+    // separate "append one row" path for Add and "patch cells in
+    // place" path for Edit, means the table can never drift from
+    // whatever the server actually persisted.
+    function renderStudentsTable(students) {
+        const tableBody = document.getElementById('studentsTableBody');
+        if (!tableBody) return;
+        tableBody.innerHTML = '';
+        if (students.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="7" class="text-muted">No students yet - click "Add New Student" to create one.</td></tr>';
+            return;
+        }
+        students.forEach(student => {
+            const row = document.createElement('tr');
+            row.dataset.id = student.studentId;
+            row.innerHTML = `
+                <td><strong>${escapeHtml(student.studentId)}</strong></td>
+                <td>${escapeHtml(student.fullName)}</td>
+                <td>${escapeHtml(student.department || '')}</td>
+                <td>${escapeHtml(student.program || '')}</td>
+                <td>${escapeHtml(student.yearLevel || '')}</td>
+                <td><span class="badge ${studentBadgeClass(student.status)}">${escapeHtml(student.status)}</span></td>
+                <td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td>
+            `;
+            tableBody.appendChild(row);
+        });
+    }
+
+    // Fetches GET /api/students (real, persisted rows - server.js,
+    // backed by the Student model in prisma/schema.prisma) and renders
+    // them. Lives up here, hoisted, so the sidebar nav handler below
+    // can call it when Student Records is opened.
+    async function loadStudents() {
+        const tableBody = document.getElementById('studentsTableBody');
+        if (!tableBody) return;
+        try {
+            const response = await authFetch('/api/students');
+            const data = await response.json();
+            if (data.success) {
+                renderStudentsTable(data.students);
+            } else {
+                tableBody.innerHTML = `<tr><td colspan="7" style="color: red;">${escapeHtml(data.message || 'Could not load students.')}</td></tr>`;
+            }
+        } catch (err) {
+            console.error('[admin_dashboard] loadStudents() failed:', err);
+            tableBody.innerHTML = '<tr><td colspan="7" style="color: red;">Cannot connect to server.</td></tr>';
+        }
+    }
+
+    // Same pattern as students, for the Subject Catalog table.
+    function renderSubjectsTable(subjects) {
+        const tableBody = document.getElementById('subjectsTableBody');
+        if (!tableBody) return;
+        tableBody.innerHTML = '';
+        if (subjects.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="5" class="text-muted">No subjects yet - click "Add Subject" to create one.</td></tr>';
+            return;
+        }
+        subjects.forEach(subject => {
+            const row = document.createElement('tr');
+            row.dataset.id = subject.subjectCode;
+            row.innerHTML = `
+                <td><strong>${escapeHtml(subject.subjectCode)}</strong></td>
+                <td>${escapeHtml(subject.subjectTitle)}</td>
+                <td>${escapeHtml(String(subject.units))}</td>
+                <td>${escapeHtml(subject.department || '')}</td>
+                <td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td>
+            `;
+            tableBody.appendChild(row);
+        });
+    }
+
+    async function loadSubjects() {
+        const tableBody = document.getElementById('subjectsTableBody');
+        if (!tableBody) return;
+        try {
+            const response = await authFetch('/api/subjects');
+            const data = await response.json();
+            if (data.success) {
+                renderSubjectsTable(data.subjects);
+            } else {
+                tableBody.innerHTML = `<tr><td colspan="5" style="color: red;">${escapeHtml(data.message || 'Could not load subjects.')}</td></tr>`;
+            }
+        } catch (err) {
+            console.error('[admin_dashboard] loadSubjects() failed:', err);
+            tableBody.innerHTML = '<tr><td colspan="5" style="color: red;">Cannot connect to server.</td></tr>';
+        }
+    }
+
     console.log('[admin_dashboard] Helpers defined.');
 
     // =============================================================
-    // TOPBAR (Logout)
+    // ACCOUNT MENU (topbar dropdown: Admin Settings shortcut + Logout)
     // =============================================================
+    // Replaces the old standalone, half-dead "Settings" link
+    // (href="#", never wired to anything) and bare "Logout" link with
+    // one clickable gear-icon trigger and a real dropdown - #btnLogout
+    // keeps its exact id from before (just moved from an <a> to a
+    // <button> inside the panel), so nothing else needs to change to
+    // keep it working.
     try {
-        console.log('[admin_dashboard] Wiring topbar...');
+        console.log('[admin_dashboard] Wiring account menu...');
+        const btnAccountMenu = document.getElementById('btnAccountMenu');
+        const accountMenuPanel = document.getElementById('accountMenuPanel');
+        const btnGoToSettings = document.getElementById('btnGoToSettings');
         const btnLogout = document.getElementById('btnLogout');
+        if (!btnAccountMenu) throw new Error('#btnAccountMenu not found in the DOM.');
+        if (!accountMenuPanel) throw new Error('#accountMenuPanel not found in the DOM.');
         if (!btnLogout) throw new Error('#btnLogout not found in the DOM.');
+
+        function closeAccountMenu() {
+            accountMenuPanel.hidden = true;
+            btnAccountMenu.setAttribute('aria-expanded', 'false');
+        }
+
+        btnAccountMenu.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = !accountMenuPanel.hidden;
+            accountMenuPanel.hidden = isOpen;
+            btnAccountMenu.setAttribute('aria-expanded', String(!isOpen));
+        });
+
+        // Close on any click outside the menu, and on Escape.
+        document.addEventListener('click', (e) => {
+            if (!accountMenuPanel.hidden && !accountMenuPanel.contains(e.target) && e.target !== btnAccountMenu) {
+                closeAccountMenu();
+            }
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeAccountMenu();
+        });
+
+        if (btnGoToSettings) {
+            btnGoToSettings.addEventListener('click', () => {
+                closeAccountMenu();
+                // Reuse the sidebar's own admin-settings <li> click
+                // rather than duplicating what happens when you
+                // navigate there (active state, title, the Blocked
+                // Devices auto-fetch) - one source of truth for that
+                // logic instead of two copies that could drift apart.
+                const settingsNavItem = document.querySelector('#sidebar-nav li[data-section="section-admin-settings"]');
+                if (settingsNavItem) settingsNavItem.click();
+            });
+        }
 
         btnLogout.addEventListener('click', (e) => {
             e.preventDefault();
+            closeAccountMenu();
             goToLogin();
         });
-        console.log('[admin_dashboard] Topbar wired successfully.');
+
+        console.log('[admin_dashboard] Account menu wired successfully.');
     } catch (err) {
-        console.error('[admin_dashboard] Topbar wiring FAILED:', err);
+        console.error('[admin_dashboard] Account menu wiring FAILED:', err);
     }
 
     // =============================================================
@@ -295,6 +443,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetchLogs();
             } else if (targetSectionId === 'section-admin-settings') {
                 fetchBlockedDevices();
+            } else if (targetSectionId === 'section-student-records') {
+                loadStudents();
+            } else if (targetSectionId === 'section-subject-management') {
+                loadSubjects();
             }
         });
         console.log(`[admin_dashboard] Sidebar navigation wired successfully (${sidebarNav.querySelectorAll('li').length} items, ${sectionContainers.length} sections).`);
@@ -663,96 +815,121 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =============================================================
-    // STUDENT RECORDS CRUD
+    // STUDENT RECORDS (modal-based Add/Edit, real persistence)
     // =============================================================
     try {
-        console.log('[admin_dashboard] Wiring Student Records CRUD...');
+        console.log('[admin_dashboard] Wiring Student Records...');
         const studentsTableBody = document.getElementById('studentsTableBody');
         const btnAddStudent = document.getElementById('btnAddStudent');
+        const studentModal = document.getElementById('studentModal');
+        const studentForm = document.getElementById('studentForm');
+        const studentModalTitle = document.getElementById('studentModalTitle');
+        const btnSubmitStudentModal = document.getElementById('btnSubmitStudentModal');
+        const btnCloseStudentModal = document.getElementById('btnCloseStudentModal');
+        const btnCancelStudentModal = document.getElementById('btnCancelStudentModal');
+        const studentIdInput = document.getElementById('studentIdInput');
+        const studentFullNameInput = document.getElementById('studentFullNameInput');
+        const studentDepartmentInput = document.getElementById('studentDepartmentInput');
+        const studentProgramInput = document.getElementById('studentProgramInput');
+        const studentYearLevelInput = document.getElementById('studentYearLevelInput');
+        const studentStatusInput = document.getElementById('studentStatusInput');
+
         if (!studentsTableBody) throw new Error('#studentsTableBody not found in the DOM.');
         if (!btnAddStudent) throw new Error('#btnAddStudent not found in the DOM.');
+        if (!studentModal) throw new Error('#studentModal not found in the DOM.');
+        if (!studentForm) throw new Error('#studentForm not found in the DOM.');
 
-        function studentRowHtml({ studentId, fullName, department, program, yearLevel, status }) {
-            return `
-                <td><strong>${escapeHtml(studentId)}</strong></td>
-                <td>${escapeHtml(fullName)}</td>
-                <td>${escapeHtml(department)}</td>
-                <td>${escapeHtml(program)}</td>
-                <td>${escapeHtml(yearLevel)}</td>
-                <td><span class="badge bg-success">${escapeHtml(status)}</span></td>
-                <td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td>
-            `;
+        // mode: 'add' | 'edit'. student is only read when mode is
+        // 'edit'. studentId is made read-only in edit mode - it's the
+        // stable lookup key PUT /api/students/:id, and this row's own
+        // data-id, are both keyed by; changing it here would silently
+        // desync the row from the record it's supposed to represent.
+        function openStudentModal(mode, student) {
+            studentForm.reset();
+            studentForm.dataset.mode = mode;
+            studentForm.dataset.originalId = mode === 'edit' ? student.studentId : '';
+            studentIdInput.readOnly = mode === 'edit';
+
+            if (mode === 'edit') {
+                studentModalTitle.textContent = 'Edit Student';
+                btnSubmitStudentModal.textContent = 'Save Changes';
+                studentIdInput.value = student.studentId;
+                studentFullNameInput.value = student.fullName;
+                studentDepartmentInput.value = student.department;
+                studentProgramInput.value = student.program;
+                studentYearLevelInput.value = student.yearLevel;
+                studentStatusInput.value = student.status;
+            } else {
+                studentModalTitle.textContent = 'Add New Student';
+                btnSubmitStudentModal.textContent = 'Save Student';
+                studentStatusInput.value = 'ENROLLED';
+            }
+
+            studentModal.showModal();
         }
 
-        btnAddStudent.addEventListener('click', async () => {
-            const studentId = prompt('Student ID (e.g. A23-00001):');
-            if (studentId === null) return;
-            if (!studentId.trim()) { alert('Student ID is required.'); return; }
+        btnAddStudent.addEventListener('click', () => openStudentModal('add'));
+        btnCloseStudentModal.addEventListener('click', () => studentModal.close());
+        btnCancelStudentModal.addEventListener('click', () => studentModal.close());
 
-            const fullName = prompt('Full Name:');
-            if (fullName === null) return;
-            if (!fullName.trim()) { alert('Full Name is required.'); return; }
+        // Native required/minlength validation runs before this fires
+        // (invalid forms never emit submit), so no manual
+        // "is it empty" checks are needed here the way the old
+        // prompt()-based flow needed them.
+        studentForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const mode = studentForm.dataset.mode;
+            const payload = {
+                studentId: studentIdInput.value.trim(),
+                fullName: studentFullNameInput.value.trim(),
+                department: studentDepartmentInput.value.trim(),
+                program: studentProgramInput.value.trim(),
+                yearLevel: studentYearLevelInput.value.trim(),
+                status: studentStatusInput.value
+            };
 
-            const department = prompt('Department (e.g. CCMS):', '') || '';
-            const program = prompt('Program (e.g. BSCS - SoftEng):', '') || '';
-            const yearLevel = prompt('Year Level (e.g. 1st Year):', '') || '';
+            btnSubmitStudentModal.disabled = true;
+            const data = mode === 'edit'
+                ? await submitAction(`/api/students/${encodeURIComponent(studentForm.dataset.originalId)}`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(payload)
+                  })
+                : await submitAction('/api/students', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(payload)
+                  });
+            btnSubmitStudentModal.disabled = false;
 
-            // Hits the placeholder POST /api/students route added
-            // in server.js, gated by authMiddleware ->
-            // requireRole('admin') -> securityMiddleware, same as
-            // every other action below.
-            const data = await submitAction('/api/students', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ studentId, fullName, department, program, yearLevel })
-            });
             showResult(data);
-            if (!data.success) return;
-
-            // The endpoint is a placeholder (no Student table
-            // exists yet - see server.js), so there is nothing to
-            // re-fetch from. This appends the row locally so the UI
-            // still feels responsive; it will not survive a page
-            // reload until real persistence exists.
-            const row = document.createElement('tr');
-            row.dataset.id = studentId;
-            row.innerHTML = studentRowHtml({ studentId, fullName, department, program, yearLevel, status: 'ENROLLED' });
-            studentsTableBody.appendChild(row);
+            if (data.success) {
+                studentModal.close();
+                loadStudents(); // re-fetch rather than patch the DOM by
+                                 // hand, so the table can never drift
+                                 // from what the server actually saved.
+            }
         });
 
-        // One delegated listener handles every row's Edit/Remove
-        // buttons - including rows added after page load - the
-        // same pattern the sidebar nav above already uses.
+        // Delegated listener handles every row's Edit/Remove buttons,
+        // including rows rendered by a later loadStudents() refresh.
         studentsTableBody.addEventListener('click', async (e) => {
             const btn = e.target.closest('button[data-action]');
             if (!btn) return;
 
             const row = btn.closest('tr');
             const id = row.dataset.id;
-            const cells = row.children;
 
             if (btn.dataset.action === 'edit') {
-                const fullName = prompt('Full Name:', cells[1].innerText);
-                if (fullName === null) return;
-                const department = prompt('Department:', cells[2].innerText);
-                if (department === null) return;
-                const program = prompt('Program:', cells[3].innerText);
-                if (program === null) return;
-                const yearLevel = prompt('Year Level:', cells[4].innerText);
-                if (yearLevel === null) return;
-
-                const data = await submitAction(`/api/students/${encodeURIComponent(id)}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fullName, department, program, yearLevel })
+                const cells = row.children;
+                openStudentModal('edit', {
+                    studentId: id,
+                    fullName: cells[1].innerText,
+                    department: cells[2].innerText,
+                    program: cells[3].innerText,
+                    yearLevel: cells[4].innerText,
+                    status: (cells[5].querySelector('.badge')?.innerText || 'ENROLLED').trim()
                 });
-                showResult(data);
-                if (!data.success) return;
-
-                cells[1].innerText = fullName;
-                cells[2].innerText = department;
-                cells[3].innerText = program;
-                cells[4].innerText = yearLevel;
 
             } else if (btn.dataset.action === 'remove') {
                 if (!confirm('Are you sure you want to delete this record?')) return;
@@ -762,55 +939,89 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.success) row.remove();
             }
         });
-        console.log('[admin_dashboard] Student Records CRUD wired successfully.');
+        console.log('[admin_dashboard] Student Records wired successfully.');
     } catch (err) {
-        console.error('[admin_dashboard] Student Records CRUD wiring FAILED:', err);
+        console.error('[admin_dashboard] Student Records wiring FAILED:', err);
     }
 
     // =============================================================
-    // SUBJECT MANAGEMENT CRUD (mirrors Student Records above exactly)
+    // SUBJECT MANAGEMENT (mirrors Student Records above exactly)
     // =============================================================
     try {
-        console.log('[admin_dashboard] Wiring Subject Management CRUD...');
+        console.log('[admin_dashboard] Wiring Subject Management...');
         const subjectsTableBody = document.getElementById('subjectsTableBody');
         const btnAddSubject = document.getElementById('btnAddSubject');
+        const subjectModal = document.getElementById('subjectModal');
+        const subjectForm = document.getElementById('subjectForm');
+        const subjectModalTitle = document.getElementById('subjectModalTitle');
+        const btnSubmitSubjectModal = document.getElementById('btnSubmitSubjectModal');
+        const btnCloseSubjectModal = document.getElementById('btnCloseSubjectModal');
+        const btnCancelSubjectModal = document.getElementById('btnCancelSubjectModal');
+        const subjectCodeInput = document.getElementById('subjectCodeInput');
+        const subjectTitleInput = document.getElementById('subjectTitleInput');
+        const subjectUnitsInput = document.getElementById('subjectUnitsInput');
+        const subjectDepartmentInput = document.getElementById('subjectDepartmentInput');
+
         if (!subjectsTableBody) throw new Error('#subjectsTableBody not found in the DOM.');
         if (!btnAddSubject) throw new Error('#btnAddSubject not found in the DOM.');
+        if (!subjectModal) throw new Error('#subjectModal not found in the DOM.');
+        if (!subjectForm) throw new Error('#subjectForm not found in the DOM.');
 
-        function subjectRowHtml({ subjectCode, subjectTitle, units, department }) {
-            return `
-                <td><strong>${escapeHtml(subjectCode)}</strong></td>
-                <td>${escapeHtml(subjectTitle)}</td>
-                <td>${escapeHtml(units)}</td>
-                <td>${escapeHtml(department)}</td>
-                <td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td>
-            `;
+        function openSubjectModal(mode, subject) {
+            subjectForm.reset();
+            subjectForm.dataset.mode = mode;
+            subjectForm.dataset.originalId = mode === 'edit' ? subject.subjectCode : '';
+            subjectCodeInput.readOnly = mode === 'edit';
+
+            if (mode === 'edit') {
+                subjectModalTitle.textContent = 'Edit Subject';
+                btnSubmitSubjectModal.textContent = 'Save Changes';
+                subjectCodeInput.value = subject.subjectCode;
+                subjectTitleInput.value = subject.subjectTitle;
+                subjectUnitsInput.value = subject.units;
+                subjectDepartmentInput.value = subject.department;
+            } else {
+                subjectModalTitle.textContent = 'Add Subject';
+                btnSubmitSubjectModal.textContent = 'Save Subject';
+                subjectUnitsInput.value = '3';
+            }
+
+            subjectModal.showModal();
         }
 
-        btnAddSubject.addEventListener('click', async () => {
-            const subjectCode = prompt('Subject Code (e.g. SE301):');
-            if (subjectCode === null) return;
-            if (!subjectCode.trim()) { alert('Subject Code is required.'); return; }
+        btnAddSubject.addEventListener('click', () => openSubjectModal('add'));
+        btnCloseSubjectModal.addEventListener('click', () => subjectModal.close());
+        btnCancelSubjectModal.addEventListener('click', () => subjectModal.close());
 
-            const subjectTitle = prompt('Subject Title:');
-            if (subjectTitle === null) return;
-            if (!subjectTitle.trim()) { alert('Subject Title is required.'); return; }
+        subjectForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const mode = subjectForm.dataset.mode;
+            const payload = {
+                subjectCode: subjectCodeInput.value.trim(),
+                subjectTitle: subjectTitleInput.value.trim(),
+                units: subjectUnitsInput.value,
+                department: subjectDepartmentInput.value.trim()
+            };
 
-            const units = prompt('Units:', '3') || '';
-            const department = prompt('Department (e.g. CCMS):', '') || '';
+            btnSubmitSubjectModal.disabled = true;
+            const data = mode === 'edit'
+                ? await submitAction(`/api/subjects/${encodeURIComponent(subjectForm.dataset.originalId)}`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(payload)
+                  })
+                : await submitAction('/api/subjects', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(payload)
+                  });
+            btnSubmitSubjectModal.disabled = false;
 
-            const data = await submitAction('/api/subjects', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ subjectCode, subjectTitle, units, department })
-            });
             showResult(data);
-            if (!data.success) return;
-
-            const row = document.createElement('tr');
-            row.dataset.id = subjectCode;
-            row.innerHTML = subjectRowHtml({ subjectCode, subjectTitle, units, department });
-            subjectsTableBody.appendChild(row);
+            if (data.success) {
+                subjectModal.close();
+                loadSubjects();
+            }
         });
 
         subjectsTableBody.addEventListener('click', async (e) => {
@@ -819,27 +1030,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const row = btn.closest('tr');
             const id = row.dataset.id;
-            const cells = row.children;
 
             if (btn.dataset.action === 'edit') {
-                const subjectTitle = prompt('Subject Title:', cells[1].innerText);
-                if (subjectTitle === null) return;
-                const units = prompt('Units:', cells[2].innerText);
-                if (units === null) return;
-                const department = prompt('Department:', cells[3].innerText);
-                if (department === null) return;
-
-                const data = await submitAction(`/api/subjects/${encodeURIComponent(id)}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ subjectTitle, units, department })
+                const cells = row.children;
+                openSubjectModal('edit', {
+                    subjectCode: id,
+                    subjectTitle: cells[1].innerText,
+                    units: cells[2].innerText,
+                    department: cells[3].innerText
                 });
-                showResult(data);
-                if (!data.success) return;
-
-                cells[1].innerText = subjectTitle;
-                cells[2].innerText = units;
-                cells[3].innerText = department;
 
             } else if (btn.dataset.action === 'remove') {
                 if (!confirm('Are you sure you want to delete this record?')) return;
@@ -849,9 +1048,62 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.success) row.remove();
             }
         });
-        console.log('[admin_dashboard] Subject Management CRUD wired successfully.');
+        console.log('[admin_dashboard] Subject Management wired successfully.');
     } catch (err) {
-        console.error('[admin_dashboard] Subject Management CRUD wiring FAILED:', err);
+        console.error('[admin_dashboard] Subject Management wiring FAILED:', err);
+    }
+
+    // =============================================================
+    // CREATE ADMIN ACCOUNT (User Roles Management)
+    // =============================================================
+    // "Create New Admin Account" in the User Roles Management group
+    // used to be a dead button with no listener at all - now opens the
+    // Create Admin modal and posts to POST /api/admin/accounts
+    // (server.js), weighted at the maximum 4x tier in core/scorer.js.
+    try {
+        console.log('[admin_dashboard] Wiring Create Admin Account...');
+        const btnCreateAdmin = document.getElementById('btnCreateAdmin');
+        const adminModal = document.getElementById('adminModal');
+        const adminForm = document.getElementById('adminForm');
+        const btnSubmitAdminModal = document.getElementById('btnSubmitAdminModal');
+        const btnCloseAdminModal = document.getElementById('btnCloseAdminModal');
+        const btnCancelAdminModal = document.getElementById('btnCancelAdminModal');
+        const adminEmailInput = document.getElementById('adminEmailInput');
+        const adminPasswordInput = document.getElementById('adminPasswordInput');
+
+        if (!btnCreateAdmin) throw new Error('#btnCreateAdmin not found in the DOM.');
+        if (!adminModal) throw new Error('#adminModal not found in the DOM.');
+        if (!adminForm) throw new Error('#adminForm not found in the DOM.');
+
+        btnCreateAdmin.addEventListener('click', () => {
+            adminForm.reset();
+            adminModal.showModal();
+        });
+        btnCloseAdminModal.addEventListener('click', () => adminModal.close());
+        btnCancelAdminModal.addEventListener('click', () => adminModal.close());
+
+        adminForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                email: adminEmailInput.value.trim(),
+                password: adminPasswordInput.value
+            };
+
+            btnSubmitAdminModal.disabled = true;
+            const data = await submitAction('/api/admin/accounts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            btnSubmitAdminModal.disabled = false;
+
+            showResult(data);
+            if (data.success) adminModal.close();
+        });
+
+        console.log('[admin_dashboard] Create Admin Account wired successfully.');
+    } catch (err) {
+        console.error('[admin_dashboard] Create Admin Account wiring FAILED:', err);
     }
 
     console.log('[admin_dashboard] Initialization complete.');

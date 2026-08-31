@@ -130,10 +130,12 @@ const endpointWeights = {
     "/api/admin/logs": 2,     // exposes the security audit trail itself
     "/api/students": 2,       // POST here creates a brand-new student record
     "/api/subjects": 2,       // POST here creates a brand-new subject record
+    "/api/grades": 2,         // POST here creates a brand-new grade record
 
     // ---- Sensitive, single-record mutation endpoints (3x) ----
     "/api/students/:id": 3,   // PUT (edit) and DELETE (remove) both normalize here
     "/api/subjects/:id": 3,   // same reasoning - covers subject edit AND delete
+    "/api/grades/:id": 3,     // same reasoning - covers grade edit AND delete
     "/api/admin/blocked-devices/unblock": 3, // lifts a WEVA block early AND can
                                               // revoke a live session - same tier
                                               // as any other single-record
@@ -149,6 +151,9 @@ const endpointWeights = {
                                  // read, not a write, but "blast radius" is
                                  // about scope, not direction: this exports
                                  // every row of every audit table at once
+    "/api/admin/accounts": 4,   // minting a new admin is a standing capability
+                                 // grant, not a data change - arguably the
+                                 // single highest-stakes action in this file
 
     // ---- Demo / defense-day tooling ----
     "/api/demo/ping": 1  // deliberately pinned at the baseline weight -

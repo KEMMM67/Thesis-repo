@@ -363,17 +363,12 @@ app.get("/api/admin/backup", authMiddleware, requireRole('admin'), securityMiddl
 });
 
 // =====================================================================
-// INTERNAL ADMIN DASHBOARD ACTIONS (placeholder endpoints)
+// INTERNAL ADMIN DASHBOARD ACTIONS
 // =====================================================================
-// The admin dashboard UI already has buttons for these actions (Add New
-// Student, Edit, Remove, Backup, etc.) but the backend never exposed
-// routes for them. These are intentionally PLACEHOLDER handlers: there
-// is no dedicated Student model in prisma/schema.prisma yet (the student
-// rows shown in the dashboard today are static markup), so rather than
-// break the schema to fake persistence, each handler validates/
-// acknowledges the request and demonstrates the full authenticated +
-// monitored pipeline. Swap the TODO body of each handler for a real
-// Prisma call once a Student model exists.
+// Real, persisted CRUD against the Student/Subject/Grade models added
+// to prisma/schema.prisma (pushed live via `npx prisma db push`) - this
+// section used to be entirely placeholder handlers with a TODO in each
+// body; that TODO is now resolved everywhere below.
 //
 // Every route below runs the same chain, in this specific order:
 //
@@ -386,105 +381,287 @@ app.get("/api/admin/backup", authMiddleware, requireRole('admin'), securityMiddl
 // block, left completely untouched) to the specific admin performing the
 // action. If the order were reversed, req.user would not exist yet when
 // securityMiddleware runs, and every audit entry would fall back to
-// "unauthenticated" instead of naming the admin - defeating the point of
-// this task. requireRole('admin') mirrors the existing GET
-// /api/admin/logs route above, since these are all admin-only dashboard
-// actions.
-// =====================================================================
+// "unauthenticated" instead of naming the admin. requireRole('admin')
+// mirrors the existing GET /api/admin/logs route above, since these are
+// all admin-only dashboard actions. The two GET (list) routes skip
+// securityMiddleware, matching /api/admin/scores and
+// /api/admin/blocked-devices above: they're read-only data loads the
+// dashboard fires on every section-open, not sensitive mutations.
 
-// POST /api/students: Add New Student (placeholder - no Student model yet)
+// GET /api/students: list all students, for the Student Records table.
+app.get("/api/students", authMiddleware, requireRole('admin'), async (req, res) => {
+    try {
+        const students = await prisma.student.findMany({ orderBy: { studentId: 'asc' } });
+        res.json({ success: true, students });
+    } catch (err) {
+        console.error("Students fetch error:", err);
+        res.status(500).json({ success: false, message: "Cannot fetch students." });
+    }
+});
+
+// POST /api/students: Add New Student
 app.post("/api/students", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
-    const { studentId, fullName } = req.body || {};
+    const { studentId, fullName, department, program, yearLevel, status } = req.body || {};
 
     if (!studentId || !fullName) {
         return res.status(400).json({ success: false, message: "studentId and fullName are required." });
     }
 
-    // TODO: once a Student model exists in prisma/schema.prisma, persist
-    // the new record here (e.g. prisma.student.create({ data: {...} })).
-    res.status(201).json({
-        success: true,
-        message: `Student ${studentId} received for enrollment (placeholder - not yet persisted).`,
-        submittedBy: req.user.email
-    });
+    try {
+        const student = await prisma.student.create({
+            data: { studentId, fullName, department, program, yearLevel, status: status || 'ENROLLED' }
+        });
+        res.status(201).json({ success: true, message: `Student ${studentId} created.`, student, submittedBy: req.user.email });
+    } catch (err) {
+        if (err.code === 'P2002') {
+            return res.status(409).json({ success: false, message: `Student ID ${studentId} already exists.` });
+        }
+        console.error("Student creation error:", err);
+        res.status(500).json({ success: false, message: "Could not create student." });
+    }
 });
 
-// PUT /api/students/:id: Edit Student (placeholder - no Student model yet)
+// PUT /api/students/:id: Edit Student - :id is the human-readable
+// studentId (e.g. "A23-00001"), not the numeric primary key, matching
+// how public/admin_dashboard.js has always tracked rows (row.dataset.id).
+// studentId itself is intentionally NOT updatable here (the frontend
+// modal makes that field read-only in edit mode) - it's the stable
+// lookup key this route, and every row in the UI, is keyed by.
 app.put("/api/students/:id", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
+    const { fullName, department, program, yearLevel, status } = req.body || {};
 
-    // TODO: once a Student model exists, look it up and apply the update
-    // here (e.g. prisma.student.update({ where: { id }, data: req.body })).
-    res.json({
-        success: true,
-        message: `Update for student ${id} received (placeholder - not yet persisted).`,
-        submittedBy: req.user.email
-    });
+    try {
+        const student = await prisma.student.update({
+            where: { studentId: id },
+            data: { fullName, department, program, yearLevel, status }
+        });
+        res.json({ success: true, message: `Student ${id} updated.`, student, submittedBy: req.user.email });
+    } catch (err) {
+        if (err.code === 'P2025') {
+            return res.status(404).json({ success: false, message: `Student ${id} not found.` });
+        }
+        console.error("Student update error:", err);
+        res.status(500).json({ success: false, message: "Could not update student." });
+    }
 });
 
-// DELETE /api/students/:id: Remove Student (placeholder - no Student model yet)
+// DELETE /api/students/:id: Remove Student
 app.delete("/api/students/:id", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
 
-    // TODO: once a Student model exists, remove it here (e.g.
-    // prisma.student.delete({ where: { id } })).
-    res.json({
-        success: true,
-        message: `Removal of student ${id} received (placeholder - not yet persisted).`,
-        submittedBy: req.user.email
-    });
+    try {
+        await prisma.student.delete({ where: { studentId: id } });
+        res.json({ success: true, message: `Student ${id} removed.`, submittedBy: req.user.email });
+    } catch (err) {
+        if (err.code === 'P2025') {
+            return res.status(404).json({ success: false, message: `Student ${id} not found.` });
+        }
+        if (err.code === 'P2003') {
+            return res.status(409).json({ success: false, message: `Cannot remove ${id}: this student still has grade records.` });
+        }
+        console.error("Student deletion error:", err);
+        res.status(500).json({ success: false, message: "Could not remove student." });
+    }
 });
 
 // ---------------------------------------------------------------------
-// SUBJECT MANAGEMENT (placeholder endpoints)
+// SUBJECT MANAGEMENT
 // ---------------------------------------------------------------------
 // Mirrors the Student Records routes above exactly - same middleware
-// chain, same reasoning, same "no matching Prisma model yet" caveat.
-// These back the Subject Catalog table (Edit / Remove buttons per row)
-// on the admin dashboard.
+// chain, same reasoning. Backs the Subject Catalog table on the admin
+// dashboard.
 // ---------------------------------------------------------------------
 
-// POST /api/subjects: Add Subject (placeholder - no Subject model yet)
+// GET /api/subjects: list all subjects, for the Subject Catalog table.
+app.get("/api/subjects", authMiddleware, requireRole('admin'), async (req, res) => {
+    try {
+        const subjects = await prisma.subject.findMany({ orderBy: { subjectCode: 'asc' } });
+        res.json({ success: true, subjects });
+    } catch (err) {
+        console.error("Subjects fetch error:", err);
+        res.status(500).json({ success: false, message: "Cannot fetch subjects." });
+    }
+});
+
+// POST /api/subjects: Add Subject
 app.post("/api/subjects", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
-    const { subjectCode, subjectTitle } = req.body || {};
+    const { subjectCode, subjectTitle, units, department } = req.body || {};
 
     if (!subjectCode || !subjectTitle) {
         return res.status(400).json({ success: false, message: "subjectCode and subjectTitle are required." });
     }
 
-    // TODO: once a Subject model exists in prisma/schema.prisma, persist
-    // the new record here (e.g. prisma.subject.create({ data: {...} })).
-    res.status(201).json({
-        success: true,
-        message: `Subject ${subjectCode} received for the catalog (placeholder - not yet persisted).`,
-        submittedBy: req.user.email
-    });
+    try {
+        const subject = await prisma.subject.create({
+            data: { subjectCode, subjectTitle, units: units ? Number(units) : undefined, department }
+        });
+        res.status(201).json({ success: true, message: `Subject ${subjectCode} created.`, subject, submittedBy: req.user.email });
+    } catch (err) {
+        if (err.code === 'P2002') {
+            return res.status(409).json({ success: false, message: `Subject code ${subjectCode} already exists.` });
+        }
+        console.error("Subject creation error:", err);
+        res.status(500).json({ success: false, message: "Could not create subject." });
+    }
 });
 
-// PUT /api/subjects/:id: Edit Subject (placeholder - no Subject model yet)
+// PUT /api/subjects/:id: Edit Subject - :id is subjectCode (e.g. "SE301"),
+// same reasoning as students above.
 app.put("/api/subjects/:id", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
+    const { subjectTitle, units, department } = req.body || {};
 
-    // TODO: once a Subject model exists, look it up and apply the update
-    // here (e.g. prisma.subject.update({ where: { id }, data: req.body })).
-    res.json({
-        success: true,
-        message: `Update for subject ${id} received (placeholder - not yet persisted).`,
-        submittedBy: req.user.email
-    });
+    try {
+        const subject = await prisma.subject.update({
+            where: { subjectCode: id },
+            data: { subjectTitle, units: units ? Number(units) : undefined, department }
+        });
+        res.json({ success: true, message: `Subject ${id} updated.`, subject, submittedBy: req.user.email });
+    } catch (err) {
+        if (err.code === 'P2025') {
+            return res.status(404).json({ success: false, message: `Subject ${id} not found.` });
+        }
+        console.error("Subject update error:", err);
+        res.status(500).json({ success: false, message: "Could not update subject." });
+    }
 });
 
-// DELETE /api/subjects/:id: Remove Subject (placeholder - no Subject model yet)
+// DELETE /api/subjects/:id: Remove Subject
 app.delete("/api/subjects/:id", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
 
-    // TODO: once a Subject model exists, remove it here (e.g.
-    // prisma.subject.delete({ where: { id } })).
-    res.json({
-        success: true,
-        message: `Removal of subject ${id} received (placeholder - not yet persisted).`,
-        submittedBy: req.user.email
-    });
+    try {
+        await prisma.subject.delete({ where: { subjectCode: id } });
+        res.json({ success: true, message: `Subject ${id} removed.`, submittedBy: req.user.email });
+    } catch (err) {
+        if (err.code === 'P2025') {
+            return res.status(404).json({ success: false, message: `Subject ${id} not found.` });
+        }
+        if (err.code === 'P2003') {
+            return res.status(409).json({ success: false, message: `Cannot remove ${id}: this subject still has grade records.` });
+        }
+        console.error("Subject deletion error:", err);
+        res.status(500).json({ success: false, message: "Could not remove subject." });
+    }
+});
+
+// ---------------------------------------------------------------------
+// GRADE RECORDS (basic CRUD - not yet wired to any dashboard UI)
+// ---------------------------------------------------------------------
+// The "Modern UI Modals" work this task also covers only specified
+// Add/Edit Student, Add/Edit Subject, and Create Admin - no Grade modal
+// was in scope, so these routes exist and work but have no frontend
+// caller yet. A natural next step, not done here without being asked.
+// ---------------------------------------------------------------------
+
+app.get("/api/grades", authMiddleware, requireRole('admin'), async (req, res) => {
+    try {
+        const grades = await prisma.grade.findMany({
+            include: { student: true, subject: true },
+            orderBy: { updatedAt: 'desc' }
+        });
+        res.json({ success: true, grades });
+    } catch (err) {
+        console.error("Grades fetch error:", err);
+        res.status(500).json({ success: false, message: "Cannot fetch grades." });
+    }
+});
+
+app.post("/api/grades", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+    const { studentId, subjectCode, term, grade, remarks } = req.body || {};
+    if (!studentId || !subjectCode) {
+        return res.status(400).json({ success: false, message: "studentId and subjectCode are required." });
+    }
+
+    try {
+        const student = await prisma.student.findUnique({ where: { studentId } });
+        const subject = await prisma.subject.findUnique({ where: { subjectCode } });
+        if (!student) return res.status(404).json({ success: false, message: `Student ${studentId} not found.` });
+        if (!subject) return res.status(404).json({ success: false, message: `Subject ${subjectCode} not found.` });
+
+        const created = await prisma.grade.create({
+            data: { studentId: student.id, subjectId: subject.id, term, grade, remarks }
+        });
+        res.status(201).json({ success: true, message: `Grade recorded for ${studentId} in ${subjectCode}.`, grade: created });
+    } catch (err) {
+        if (err.code === 'P2002') {
+            return res.status(409).json({ success: false, message: "A grade for this student, subject, and term already exists." });
+        }
+        console.error("Grade creation error:", err);
+        res.status(500).json({ success: false, message: "Could not record grade." });
+    }
+});
+
+app.put("/api/grades/:id", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+    const { id } = req.params;
+    const { grade, remarks } = req.body || {};
+
+    try {
+        const updated = await prisma.grade.update({
+            where: { id: Number(id) },
+            data: { grade, remarks }
+        });
+        res.json({ success: true, message: `Grade ${id} updated.`, grade: updated });
+    } catch (err) {
+        if (err.code === 'P2025') {
+            return res.status(404).json({ success: false, message: `Grade ${id} not found.` });
+        }
+        console.error("Grade update error:", err);
+        res.status(500).json({ success: false, message: "Could not update grade." });
+    }
+});
+
+app.delete("/api/grades/:id", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        await prisma.grade.delete({ where: { id: Number(id) } });
+        res.json({ success: true, message: `Grade ${id} removed.` });
+    } catch (err) {
+        if (err.code === 'P2025') {
+            return res.status(404).json({ success: false, message: `Grade ${id} not found.` });
+        }
+        console.error("Grade deletion error:", err);
+        res.status(500).json({ success: false, message: "Could not remove grade." });
+    }
+});
+
+// POST /api/admin/accounts: Create New Admin Account. This is the
+// route "User Roles Management" -> "Create New Admin Account" opens a
+// modal for on the dashboard. Weighted at the maximum 4x tier in
+// core/scorer.js - minting a new admin is arguably higher-stakes than
+// any single-record mutation elsewhere in this file, since it's a
+// standing capability grant, not a data change.
+app.post("/api/admin/accounts", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+    const { email, password } = req.body || {};
+
+    if (!email || !password) {
+        return res.status(400).json({ success: false, message: "email and password are required." });
+    }
+    if (password.length < 8) {
+        return res.status(400).json({ success: false, message: "Password must be at least 8 characters." });
+    }
+
+    try {
+        const existing = await prisma.user.findUnique({ where: { email } });
+        if (existing) {
+            return res.status(409).json({ success: false, message: `An account with email ${email} already exists.` });
+        }
+
+        const passwordHash = await bcrypt.hash(password, 10);
+        const newAdmin = await prisma.user.create({ data: { email, passwordHash, role: 'admin' } });
+
+        res.status(201).json({
+            success: true,
+            message: `Admin account created for ${email}.`,
+            admin: { id: newAdmin.id, email: newAdmin.email, role: newAdmin.role },
+            createdBy: req.user.email
+        });
+    } catch (err) {
+        console.error("Admin account creation error:", err);
+        res.status(500).json({ success: false, message: "Could not create admin account." });
+    }
 });
 
 // POST /api/settings/backup: Backup PostgreSQL DB (placeholder)

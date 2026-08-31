@@ -13,8 +13,15 @@
         <div class="logo"><i class="fa-solid fa-graduation-cap"></i> STUDENT INFORMATION SYSTEM</div>
         <div class="user-info">
             <span class="user-chip"><i class="fa-solid fa-user-shield"></i> System <span class="role-tag">ADMIN</span></span>
-            <a href="#"><i class="fa-solid fa-gear"></i> Settings</a>
-            <a href="admin_login.html" id="btnLogout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
+            <div class="account-menu">
+                <button type="button" class="account-menu__trigger" id="btnAccountMenu" aria-haspopup="true" aria-expanded="false" title="Account menu">
+                    <i class="fa-solid fa-gear"></i>
+                </button>
+                <div class="account-menu__panel" id="accountMenuPanel" hidden>
+                    <button type="button" class="account-menu__item" id="btnGoToSettings"><i class="fa-solid fa-sliders"></i> Admin Settings</button>
+                    <button type="button" class="account-menu__item" id="btnLogout"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -84,16 +91,7 @@
                         </tr>
                     </thead>
                     <tbody id="studentsTableBody">
-                        <tr data-id="A23-00001"><td><strong>A23-00001</strong></td><td>LAWAN, KHYNNE MARK ELMER</td><td>CCMS</td><td>BSCS - SoftEng</td><td>3rd Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
-                        <tr data-id="A23-00002"><td><strong>A23-00002</strong></td><td>DELEÑA, KENJIE</td><td>CCMS</td><td>BSCS - SoftEng</td><td>3rd Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
-                        <tr data-id="A23-00003"><td><strong>A23-00003</strong></td><td>LABSO, JOHN ELON</td><td>CCMS</td><td>BSCS - SoftEng</td><td>3rd Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
-                        <tr data-id="B24-10521"><td><strong>B24-10521</strong></td><td>MENDOZA, MARIA CLARA</td><td>CAS</td><td>BS Psychology</td><td>2nd Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
-                        <tr data-id="C22-44122"><td><strong>C22-44122</strong></td><td>SANTOS, JUAN DELA CRUZ</td><td>CENG</td><td>BS Civil Eng</td><td>4th Year</td><td><span class="badge bg-warning">IRREGULAR</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
-                        <tr data-id="D25-99211"><td><strong>D25-99211</strong></td><td>REYES, ANA MARIE</td><td>CIHTM</td><td>BS Tourism</td><td>1st Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
-                        <tr data-id="E23-33291"><td><strong>E23-33291</strong></td><td>GARCIA, MARK ANTHONY</td><td>CCJS</td><td>BS Criminology</td><td>3rd Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
-                        <tr data-id="F24-88124"><td><strong>F24-88124</strong></td><td>FLORES, SAMANTHA</td><td>CNAHS</td><td>BS Nursing</td><td>2nd Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
-                        <tr data-id="G22-77451"><td><strong>G22-77451</strong></td><td>CRUZ, JOSHUA</td><td>CED</td><td>BSEd Mathematics</td><td>4th Year</td><td><span class="badge bg-success">ENROLLED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
-                        <tr data-id="H25-11094"><td><strong>H25-11094</strong></td><td>BAUTISTA, CHLOE</td><td>CCMS</td><td>BS Info Tech</td><td>1st Year</td><td><span class="badge bg-danger">DROPPED</span></td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                        <tr><td colspan="7">Loading students...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -110,9 +108,7 @@
                         <tr><th>Subject Code</th><th>Subject Title</th><th>Units</th><th>Department</th><th>Actions</th></tr>
                     </thead>
                     <tbody id="subjectsTableBody">
-                        <tr data-id="SE301"><td><strong>SE301</strong></td><td>Software Engineering 1</td><td>3</td><td>CCMS</td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
-                        <tr data-id="IAS301"><td><strong>IAS301</strong></td><td>Information Assurance and Security</td><td>3</td><td>CCMS</td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
-                        <tr data-id="HCI101"><td><strong>HCI101</strong></td><td>Human-Computer Interaction</td><td>3</td><td>CCMS</td><td><div class="table-actions"><button class="btn-text" data-action="edit"><i class="fa-solid fa-pen"></i> Edit</button><button class="btn-text btn-text--danger" data-action="remove"><i class="fa-solid fa-trash-can"></i> Remove</button></div></td></tr>
+                        <tr><td colspan="5">Loading subjects...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -164,7 +160,7 @@
                 <div class="settings-group">
                     <h3>User Roles Management</h3>
                     <div class="btn-row">
-                        <button class="btn-primary"><i class="fa-solid fa-user-plus"></i> Create New Admin Account</button>
+                        <button class="btn-primary" id="btnCreateAdmin"><i class="fa-solid fa-user-plus"></i> Create New Admin Account</button>
                         <button class="btn-secondary"><i class="fa-solid fa-key"></i> Manage System Access</button>
                     </div>
                 </div>
@@ -194,6 +190,114 @@
 
         </div>
     </div>
+
+    <!-- =================================================================
+         MODALS - replace the old window.prompt()-based Add/Edit flows.
+         Native <dialog> elements: showModal() gives a centered card,
+         inert background, focus trap, ESC-to-close, and a real
+         ::backdrop overlay for free, no custom JS needed for any of
+         that. Each form's submit is handled entirely in
+         admin_dashboard.js (preventDefault + fetch), not via native
+         form submission - see that file's MODALS section.
+         ================================================================= -->
+
+    <dialog id="studentModal" class="app-modal">
+        <form id="studentForm" novalidate>
+            <div class="app-modal__header">
+                <h2 id="studentModalTitle">Add New Student</h2>
+                <button type="button" class="app-modal__close" id="btnCloseStudentModal" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal__body">
+                <div class="input-group">
+                    <label for="studentIdInput">Student ID <span class="req">*</span></label>
+                    <input type="text" id="studentIdInput" placeholder="e.g. A23-00001" required>
+                </div>
+                <div class="input-group">
+                    <label for="studentFullNameInput">Full Name <span class="req">*</span></label>
+                    <input type="text" id="studentFullNameInput" placeholder="LASTNAME, First Middle" required>
+                </div>
+                <div class="input-group">
+                    <label for="studentDepartmentInput">Department</label>
+                    <input type="text" id="studentDepartmentInput" placeholder="e.g. CCMS">
+                </div>
+                <div class="input-group">
+                    <label for="studentProgramInput">Program</label>
+                    <input type="text" id="studentProgramInput" placeholder="e.g. BSCS - SoftEng">
+                </div>
+                <div class="input-group">
+                    <label for="studentYearLevelInput">Year Level</label>
+                    <input type="text" id="studentYearLevelInput" placeholder="e.g. 3rd Year">
+                </div>
+                <div class="input-group">
+                    <label for="studentStatusInput">Status</label>
+                    <select id="studentStatusInput">
+                        <option value="ENROLLED">Enrolled</option>
+                        <option value="IRREGULAR">Irregular</option>
+                        <option value="DROPPED">Dropped</option>
+                    </select>
+                </div>
+            </div>
+            <div class="app-modal__footer">
+                <button type="button" class="btn-secondary" id="btnCancelStudentModal">Cancel</button>
+                <button type="submit" class="btn-primary" id="btnSubmitStudentModal">Save Student</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="subjectModal" class="app-modal">
+        <form id="subjectForm" novalidate>
+            <div class="app-modal__header">
+                <h2 id="subjectModalTitle">Add Subject</h2>
+                <button type="button" class="app-modal__close" id="btnCloseSubjectModal" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal__body">
+                <div class="input-group">
+                    <label for="subjectCodeInput">Subject Code <span class="req">*</span></label>
+                    <input type="text" id="subjectCodeInput" placeholder="e.g. SE301" required>
+                </div>
+                <div class="input-group">
+                    <label for="subjectTitleInput">Subject Title <span class="req">*</span></label>
+                    <input type="text" id="subjectTitleInput" placeholder="e.g. Software Engineering 1" required>
+                </div>
+                <div class="input-group">
+                    <label for="subjectUnitsInput">Units</label>
+                    <input type="number" id="subjectUnitsInput" min="1" max="6" value="3">
+                </div>
+                <div class="input-group">
+                    <label for="subjectDepartmentInput">Department</label>
+                    <input type="text" id="subjectDepartmentInput" placeholder="e.g. CCMS">
+                </div>
+            </div>
+            <div class="app-modal__footer">
+                <button type="button" class="btn-secondary" id="btnCancelSubjectModal">Cancel</button>
+                <button type="submit" class="btn-primary" id="btnSubmitSubjectModal">Save Subject</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="adminModal" class="app-modal">
+        <form id="adminForm" novalidate>
+            <div class="app-modal__header">
+                <h2>Create New Admin Account</h2>
+                <button type="button" class="app-modal__close" id="btnCloseAdminModal" aria-label="Close">&times;</button>
+            </div>
+            <div class="app-modal__body">
+                <div class="input-group">
+                    <label for="adminEmailInput">Email Address <span class="req">*</span></label>
+                    <input type="email" id="adminEmailInput" placeholder="admin@example.edu.ph" required>
+                </div>
+                <div class="input-group">
+                    <label for="adminPasswordInput">Password <span class="req">*</span></label>
+                    <input type="password" id="adminPasswordInput" placeholder="At least 8 characters" minlength="8" required>
+                    <small>Minimum 8 characters. This account will have full admin privileges.</small>
+                </div>
+            </div>
+            <div class="app-modal__footer">
+                <button type="button" class="btn-secondary" id="btnCancelAdminModal">Cancel</button>
+                <button type="submit" class="btn-primary" id="btnSubmitAdminModal">Create Admin</button>
+            </div>
+        </form>
+    </dialog>
 
     <script src="admin_dashboard.js"></script>
 </body>
