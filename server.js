@@ -105,11 +105,33 @@ app.post("/api/login", securityMiddleware, async (req, res) => {
         if (passwordMatches) {
             resetFeatures(deviceId);
 
+            const tokenTtlMs = 60 * 60 * 1000; // 1h - must match the JWT expiresIn below
             const token = jwt.sign(
                 { email: user.email, role: user.role },
                 process.env.JWT_SECRET,
                 { expiresIn: '1h' }
             );
+
+            // Persists the Session row middleware/authMiddleware.js looks
+            // up on every authenticated request. Without this, that
+            // token would verify forever (or until its natural 1h
+            // expiry) with no way to revoke it early - this is the other
+            // half of what makes "Force Logout" from the admin
+            // dashboard's Blocked Devices panel actually work. upsert,
+            // not create: an identical JWT (same payload + same
+            // issued-at second) is vanishingly unlikely but not
+            // impossible, and this must never be the reason a login
+            // fails.
+            try {
+                await prisma.session.upsert({
+                    where: { sessionToken: token },
+                    update: { userId: user.id, expiresAt: new Date(Date.now() + tokenTtlMs) },
+                    create: { userId: user.id, sessionToken: token, expiresAt: new Date(Date.now() + tokenTtlMs) }
+                });
+            } catch (sessionErr) {
+                console.error("Session creation failed on login:", sessionErr.message);
+                return res.status(500).json({ success: false, message: "Could not establish a secure session. Please try again." });
+            }
 
             try {
                 await Promise.all([
@@ -167,6 +189,176 @@ app.get("/api/admin/logs", authMiddleware, requireRole('admin'), securityMiddlew
     } catch (err) {
         console.error("Dashboard DB Error:", err);
         res.status(500).json({ success: false, message: "Cannot fetch logs." });
+    }
+});
+
+// GET /api/admin/scores: Recent WEVA anomaly scores, for the live chart
+// on the admin dashboard (public/admin_dashboard.js polls this every
+// ~1.5s). Deliberately NOT wrapped in securityMiddleware, unlike every
+// other admin route: this endpoint is polled far more frequently than a
+// normal user action, and running it through the scoring pipeline would
+// (a) write 3 new audit rows on every single poll just to observe the
+// dashboard, and worse, (b) feed the very chart it powers with noise
+// from its own polling requests - a self-referential loop where looking
+// at the data changes the data. Reading your own system's recent scores
+// isn't itself a security-relevant action; it only needs to be
+// authenticated as an admin, not behaviorally scored.
+app.get("/api/admin/scores", authMiddleware, requireRole('admin'), async (req, res) => {
+    try {
+        const recent = await prisma.anomalyScore.findMany({
+            orderBy: { calculatedAt: 'desc' },
+            take: 40
+        });
+
+        // Reverse to chronological order (oldest -> newest) so the
+        // frontend can plot left-to-right without re-sorting, and coerce
+        // the Prisma Decimal `score` field to a plain number - Decimal
+        // serializes to a string by default, which a canvas chart can't
+        // do arithmetic on directly.
+        const scores = recent.reverse().map(s => ({
+            id: s.id,
+            userEmail: s.userEmail,
+            score: Number(s.score),
+            riskLevel: s.riskLevel,
+            calculatedAt: s.calculatedAt
+        }));
+
+        res.json({ success: true, scores });
+    } catch (err) {
+        console.error("Anomaly score fetch error:", err);
+        res.status(500).json({ success: false, message: "Cannot fetch anomaly scores." });
+    }
+});
+
+// GET /api/admin/blocked-devices: currently-blocked entries from
+// core/mitigation.js's persistent ipTracking store, for the admin
+// dashboard's Blocked Devices panel. Same reasoning as
+// /api/admin/scores above for skipping securityMiddleware - a
+// read-only status view of the mitigation layer shouldn't itself feed
+// the mitigation layer.
+app.get("/api/admin/blocked-devices", authMiddleware, requireRole('admin'), async (req, res) => {
+    try {
+        const devices = await prisma.ipTracking.findMany({
+            where: { isBlocked: true, blockedUntil: { gt: new Date() } },
+            orderBy: { blockedUntil: 'desc' }
+        });
+        res.json({ success: true, devices });
+    } catch (err) {
+        console.error("Blocked devices fetch error:", err);
+        res.status(500).json({ success: false, message: "Cannot fetch blocked devices." });
+    }
+});
+
+// POST /api/admin/blocked-devices/unblock: lifts a WEVA-imposed block
+// early, and best-effort revokes the session of whichever user this
+// device was most recently seen acting as. This IS a security-relevant
+// mutation (unlike the read above), so it runs the full chain,
+// including securityMiddleware.
+//
+// SE NOTE on the correlation: ipTracking has no direct relationship to
+// a specific user - it's device/IP-scoped, not user-scoped, since a
+// device can earn a block purely from repeated failed login attempts
+// before any session ever existed. So "which session (if any) does
+// this button revoke" is answered by looking up the most recent
+// BehaviorLog entry mentioning this exact device - the same audit
+// trail Priority #3's explainable-score work already writes
+// (`Device ${deviceId} triggered ...`, see
+// middleware/securityMiddleware.js) - and reading its userId back out.
+// This is a best-effort correlation via existing audit data, not a
+// hard foreign key; documented here rather than silently assumed.
+app.post("/api/admin/blocked-devices/unblock", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+    const { identifier } = req.body || {};
+    if (!identifier) {
+        return res.status(400).json({ success: false, message: "identifier is required." });
+    }
+
+    try {
+        await prisma.ipTracking.updateMany({
+            where: { ipAddress: identifier },
+            data: { isBlocked: false, blockedUntil: null }
+        });
+
+        const recentActivity = await prisma.behaviorLog.findFirst({
+            where: { description: { contains: `Device ${identifier} ` } },
+            orderBy: { logTime: 'desc' }
+        });
+
+        let sessionsRevoked = 0;
+        if (recentActivity?.userId) {
+            const deleted = await prisma.session.deleteMany({ where: { userId: recentActivity.userId } });
+            sessionsRevoked = deleted.count;
+        }
+
+        res.json({
+            success: true,
+            message: sessionsRevoked > 0
+                ? `Device unblocked and ${sessionsRevoked} active session(s) revoked.`
+                : "Device unblocked. No associated active session was found to revoke."
+        });
+    } catch (err) {
+        console.error("Unblock/revoke error:", err);
+        res.status(500).json({ success: false, message: "Cannot unblock device." });
+    }
+});
+
+// GET /api/admin/backup: exports every table this schema currently
+// models into one downloadable JSON snapshot - a real, working
+// Disaster Recovery / Data Integrity feature for the admin dashboard's
+// "Backup PostgreSQL DB" button, distinct from the placeholder
+// POST /api/settings/backup route further down (that one stands in for
+// a future pg_dump-based, database-engine-level backup and is
+// deliberately left untouched; this is an application-level export -
+// human-readable JSON of the actual rows, not a binary DB dump).
+//
+// DATA INTEGRITY NOTE: students, subjects, and grades are NOT included
+// below because they don't exist as persisted records - schema.prisma
+// has no Student/Subject/Grade model yet. Everything shown for those on
+// the dashboard today is static placeholder markup (see the
+// POST /api/students and /api/subjects placeholder routes above and
+// their own "no Student model exists yet" comments), not database rows.
+// They're still listed here as empty, clearly-labeled arrays rather
+// than silently omitted or faked with mock data, so the exported shape
+// is forward-compatible once those models are added, without a backup
+// ever implying data exists that doesn't.
+//
+// Two fields are deliberately excluded for security reasons that have
+// nothing to do with what's technically possible to export:
+//   - User.passwordHash: a downloadable file in an admin's Downloads
+//     folder is a worse place for bcrypt hashes to live than the
+//     database itself. select: {} pulls everything else.
+//   - the Session table entirely: it holds live bearer tokens (see
+//     POST /api/login's prisma.session.upsert and
+//     middleware/authMiddleware.js). A "backup" containing valid,
+//     unexpired auth tokens would itself be a security liability, and
+//     sessions are transient auth state, not data worth recovering.
+app.get("/api/admin/backup", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+    try {
+        const [users, loginAttempts, anomalyScores, securityActions, behaviorLogs, ipTracking] = await Promise.all([
+            prisma.user.findMany({ select: { id: true, email: true, role: true, createdAt: true } }),
+            prisma.loginAttempt.findMany(),
+            prisma.anomalyScore.findMany(),
+            prisma.securityAction.findMany(),
+            prisma.behaviorLog.findMany(),
+            prisma.ipTracking.findMany()
+        ]);
+
+        res.json({
+            success: true,
+            generatedAt: new Date().toISOString(),
+            generatedBy: req.user.email,
+            students: [],
+            subjects: [],
+            grades: [],
+            users,
+            loginAttempts,
+            anomalyScores,
+            securityActions,
+            behaviorLogs,
+            ipTracking
+        });
+    } catch (err) {
+        console.error("Database backup export error:", err);
+        res.status(500).json({ success: false, message: "Backup export failed." });
     }
 });
 
@@ -326,6 +518,24 @@ app.post("/api/settings/restore", authMiddleware, requireRole('admin'), security
         message: "Database restore request received (placeholder - no restore has actually been triggered).",
         requestedBy: req.user.email
     });
+});
+
+// =====================================================================
+// DEMO / DEFENSE-DAY TOOLING
+// =====================================================================
+
+// POST /api/demo/ping: harmless, no-op endpoint that exists purely to be
+// scored. It routes through the exact same authMiddleware ->
+// requireRole('admin') -> securityMiddleware chain as every real action
+// above, so a burst of requests here exercises the genuine WEVA pipeline
+// end to end (core/monitor.js -> core/profiler.js -> core/scorer.js ->
+// core/decisionEngine.js -> core/mitigation.js). This is what the
+// dashboard's "Simulate Attack" button calls to make the live anomaly
+// chart visibly climb through LOG/THROTTLE/BLOCK on demand, without
+// needing to actually hammer a real destructive endpoint to prove the
+// algorithm works.
+app.post("/api/demo/ping", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+    res.json({ success: true, message: "Ping scored by the WEVA pipeline." });
 });
 
 // Initialize the server instance

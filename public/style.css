@@ -695,6 +695,19 @@ tbody tr:last-child td { border-bottom: none; }
 .filter-bar button { display: inline-flex; align-items: center; gap: 8px; background-color: var(--color-primary); color: white; border: none; padding: 10px 16px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; transition: background-color 0.15s var(--ease); }
 .filter-bar button:hover { background-color: var(--color-primary-hover); }
 
+/* ---- Live anomaly chart canvas (admin_dashboard.html "Dashboard") ---- */
+.chart-canvas-wrap {
+    background-color: var(--color-bg);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    padding: 12px;
+}
+.chart-canvas-wrap canvas {
+    display: block;
+    width: 100%;
+    height: 260px;
+}
+
 /* ---- Student profile header (student_dashboard.html "My Profile") ---- */
 .profile-header {
     display: flex;
@@ -718,6 +731,82 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .profile-heading h2 { margin: 0 0 4px; font-size: 18px; font-weight: 700; color: var(--color-text); }
 .profile-heading p { margin: 0 0 8px; }
+
+/* ---- Explainable score formula (admin_dashboard.js renderLogDescription) ---- */
+.score-formula {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 2px 8px;
+    background-color: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 11.5px;
+    color: var(--color-text-secondary);
+}
+
+/* ---- Printable Audit Report ----
+   .print-letterhead only exists for @media print - hidden on screen,
+   revealed (and the only thing left standing, along with the logs
+   table) when printing. See #btnGenerateReport in admin_dashboard.js. */
+.print-letterhead { display: none; }
+
+@media print {
+    .topbar, .sidebar, .search-bar, .btn-row, .table-actions,
+    .chart-canvas-wrap, .cards-container, .chart-placeholder,
+    #demoStatus, #main-title {
+        display: none !important;
+    }
+
+    body, .wrapper, .content, .section-container {
+        display: block !important;
+        height: auto !important;
+        overflow: visible !important;
+        width: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        box-shadow: none !important;
+        border: none !important;
+        background: #fff !important;
+    }
+
+    .print-letterhead {
+        display: block !important;
+        border-bottom: 2px solid #000;
+        margin-bottom: 18px;
+        padding-bottom: 10px;
+    }
+    .print-letterhead h1 { font-size: 17px; margin: 0 0 4px; color: #000; }
+    .print-letterhead p { font-size: 11px; color: #333; margin: 0; }
+
+    .section-header { display: block !important; }
+    .section-header h2 { font-size: 14px; margin: 0 0 12px; color: #000; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+    thead th {
+        border: 1px solid #999 !important;
+        padding: 6px 8px !important;
+        color: #000 !important;
+        background: #eee !important;
+    }
+    tbody td {
+        border: 1px solid #999 !important;
+        padding: 6px 8px !important;
+        color: #000 !important;
+    }
+    tbody tr:nth-child(even) { background: #fafafa !important; }
+
+    .badge {
+        border: 1px solid #000 !important;
+        background: none !important;
+        color: #000 !important;
+    }
+    .score-formula {
+        border: 1px solid #999 !important;
+        background: none !important;
+        color: #000 !important;
+    }
+}
 
 @media (prefers-reduced-motion: reduce) {
     * { transition: none !important; }

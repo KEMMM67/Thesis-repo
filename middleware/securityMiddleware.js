@@ -29,12 +29,25 @@ export const securityMiddleware = async (req, res, next) => {
     const currentFeatures = getFeatures(deviceId, endpoint);
     const baseline = getBaseline(deviceId);
 
-    const score = computeScore(currentFeatures, baseline);
+    // computeScore() returns both the final score AND the itemized
+    // factors that produced it (see core/scorer.js) - SE traceability
+    // requirement: every decision this middleware makes has to be
+    // reconstructable after the fact, not just visible in a console
+    // that's no longer scrolled back to.
+    const { score, breakdown } = computeScore(currentFeatures, baseline);
     const decision = decideAction(score, role);
 
-    console.log(`[SECURITY] Device: ${deviceId} | Target User: ${user} | Score: ${score} | Decision: ${decision}`);
+    console.log(`[SECURITY] Device: ${deviceId} | Target User: ${user} | Score: ${score} (${breakdown.formula}) | Decision: ${decision}`);
 
     let risk = decision === 'BLOCK' ? 'CRITICAL' : decision === 'THROTTLE' ? 'HIGH' : decision === 'LOG' ? 'MEDIUM' : 'LOW';
+
+    // The " | " delimiter is deliberate, not decorative: it separates a
+    // human-readable narrative (left of it) from the machine-precise
+    // formula (right of it) using one fixed, predictable character
+    // sequence, so public/admin_dashboard.js can split this single text
+    // column back into two cleanly-styled pieces without any fragile
+    // regex - see fetchLogs() there.
+    const reasonText = `Device ${deviceId} triggered ${decision} | ${breakdown.formula}`;
 
     const results = await Promise.allSettled([
         prisma.anomalyScore.create({
@@ -45,7 +58,7 @@ export const securityMiddleware = async (req, res, next) => {
                 userEmail: user,
                 userId,
                 actionTaken: decision,
-                reason: `Device ${deviceId} triggered behavioral score of ${score}`
+                reason: reasonText
             }
         }),
         prisma.behaviorLog.create({
@@ -53,7 +66,7 @@ export const securityMiddleware = async (req, res, next) => {
                 userEmail: user,
                 userId,
                 eventType: 'SECURITY_EVALUATION',
-                description: `Triggered ${decision} on Device ${deviceId} with score ${score}`
+                description: reasonText
             }
         })
     ]);
@@ -65,7 +78,9 @@ export const securityMiddleware = async (req, res, next) => {
         }
     });
 
-    const blocked = applyMitigation(decision, res, deviceId);
+    // applyMitigation() is now async - it reads/writes prisma.ipTracking
+    // instead of an in-memory Map (see core/mitigation.js).
+    const blocked = await applyMitigation(decision, res, deviceId);
 
     updateFeatures(deviceId, endpoint);
     updateBaseline(deviceId, currentFeatures);

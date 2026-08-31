@@ -53,8 +53,15 @@
                         <div class="card-body"><h3>Active Sections</h3><div class="value">158</div></div>
                     </div>
                 </div>
-                <h2>Recent Enrollment Trends</h2>
-                <div class="chart-placeholder"><i class="fa-solid fa-chart-line"></i> Chart will load here...</div>
+                <div class="section-header">
+                    <h2>Live WEVA Anomaly Score Feed</h2>
+                    <button id="btnSimulateAttack" class="btn-secondary"><i class="fa-solid fa-bolt"></i> Simulate Attack</button>
+                </div>
+                <p class="text-muted" style="margin-bottom: 12px;">Real-time scores from the WEVA engine (core/scorer.js), polled every 1.5s. Triggering BLOCK will temporarily lock this device out of other admin actions for ~60 seconds &mdash; that's the mitigation layer engaging, not a bug.</p>
+                <div class="chart-canvas-wrap">
+                    <canvas id="anomalyChart"></canvas>
+                </div>
+                <p id="demoStatus" class="text-muted" style="margin-top: 10px;"></p>
             </div>
 
             <div class="section-container" id="section-student-records">
@@ -131,9 +138,16 @@
             </div>
 
             <div class="section-container" id="section-security-logs">
+                <div class="print-letterhead">
+                    <h1>Student Information System &mdash; Security Audit Report</h1>
+                    <p>WEVA Behavioral Security Engine (Web Endpoint Velocity &amp; Anomaly) &middot; Generated <span id="reportTimestamp"></span></p>
+                </div>
                 <div class="section-header">
                     <h2>Live Security Logs</h2>
-                    <button class="refresh-btn" id="btnRefreshLogs"><i class="fa-solid fa-rotate"></i> Refresh Live Data</button>
+                    <div class="btn-row">
+                        <button class="refresh-btn" id="btnRefreshLogs"><i class="fa-solid fa-rotate"></i> Refresh Live Data</button>
+                        <button class="btn-secondary" id="btnGenerateReport"><i class="fa-solid fa-print"></i> Generate Audit Report</button>
+                    </div>
                 </div>
                 <table>
                     <thead>
@@ -157,9 +171,24 @@
                 <div class="settings-group">
                     <h3>Database Backup</h3>
                     <div class="btn-row">
-                        <button class="btn-primary"><i class="fa-solid fa-database"></i> Backup PostgreSQL DB</button>
+                        <button class="btn-primary" id="btnBackupDatabase"><i class="fa-solid fa-database"></i> Backup PostgreSQL DB</button>
                         <button class="btn-secondary"><i class="fa-solid fa-rotate-left"></i> Restore DB from Backup</button>
                     </div>
+                </div>
+                <div class="settings-group">
+                    <div class="section-header" style="margin-bottom: 14px;">
+                        <h3 style="margin: 0;">Blocked Devices (WEVA)</h3>
+                        <button class="refresh-btn" id="btnRefreshBlockedDevices"><i class="fa-solid fa-rotate"></i> Refresh</button>
+                    </div>
+                    <p class="text-muted" style="margin-bottom: 14px;">Devices currently locked out by the mitigation layer (core/mitigation.js), persisted in the database - these survive a server restart. Force Logout / Revoke lifts the block early and, if a session is found for whichever user this device was most recently seen as, ends it too.</p>
+                    <table>
+                        <thead>
+                            <tr><th>Device / IP</th><th>Blocked Until</th><th>Times Blocked</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody id="blockedDevicesTableBody">
+                            <tr><td colspan="4">Loading blocked devices...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 

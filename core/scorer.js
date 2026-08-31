@@ -134,13 +134,31 @@ const endpointWeights = {
     // ---- Sensitive, single-record mutation endpoints (3x) ----
     "/api/students/:id": 3,   // PUT (edit) and DELETE (remove) both normalize here
     "/api/subjects/:id": 3,   // same reasoning - covers subject edit AND delete
+    "/api/admin/blocked-devices/unblock": 3, // lifts a WEVA block early AND can
+                                              // revoke a live session - same tier
+                                              // as any other single-record
+                                              // security-relevant mutation
 
     // ---- Destructive / infrastructure-wide endpoints (4x) ----
     "/api/settings/backup": 4,
-    "/api/settings/restore": 4  // a bad restore can silently overwrite live
+    "/api/settings/restore": 4, // a bad restore can silently overwrite live
                                  // data, arguably making it even higher-stakes
                                  // than backup despite sharing its weight -
                                  // see the route comment in server.js
+    "/api/admin/backup": 4,     // same tier as /api/settings/backup - it's a
+                                 // read, not a write, but "blast radius" is
+                                 // about scope, not direction: this exports
+                                 // every row of every audit table at once
+
+    // ---- Demo / defense-day tooling ----
+    "/api/demo/ping": 1  // deliberately pinned at the baseline weight -
+                          // "Simulate Attack" (public/admin_dashboard.js)
+                          // should demonstrate Factor 1 (velocity) in
+                          // isolation, not a weight-amplified score, so
+                          // the escalation it produces is attributable
+                          // to speed alone, exactly like the "device
+                          // moving 3 req/sec faster..." worked example
+                          // above.
 };
 
 // Weight applied to any endpoint that has no explicit entry above.
@@ -247,11 +265,23 @@ const VELOCITY_POINT_SCALE = 5;
  *     = 1 + 8*0.5 = 5):
  *       2 * 2 * 5 * 5 = 100 -> BLOCK.
  *
+ * SE NOTE - explainability as a traceability requirement, not a security
+ * afterthought: computeScore() does not just return a final number. It
+ * returns the itemized factors that produced it, so every score this
+ * engine ever assigns is independently auditable after the fact -
+ * middleware/securityMiddleware.js persists that breakdown alongside
+ * the score, and the admin dashboard renders it in the Security Logs
+ * table. A system that can only say "the score was 45" is a black box;
+ * one that can say "45 = 3.00 x 3 x 1.00 x 5" is defensible.
+ *
  * @param {object} currentFeatures  Output of core/monitor.js#getFeatures():
  *                                  { requestRate, loginAttempts, endpoint }
  * @param {object} baselineFeatures Output of core/profiler.js#getBaseline():
  *                                  { requestRate, previousScore }
- * @returns {number} Integer anomaly score clamped to the 0-100 range.
+ * @returns {{score: number, breakdown: {velocityIncrement: number, endpointWeight: number, failRateFactor: number, scale: number, formula: string}}}
+ *          `score` is the integer anomaly score, clamped to 0-100.
+ *          `breakdown` is every factor that produced it, plus a
+ *          ready-to-log/display formula string.
  */
 export function computeScore(currentFeatures, baselineFeatures) {
     const velocityIncrement = getVelocityIncrement(currentFeatures, baselineFeatures);
@@ -262,5 +292,26 @@ export function computeScore(currentFeatures, baselineFeatures) {
 
     // Ensure the final score remains within the operational bounds (0 to 100)
     if (score < 0) score = 0;
-    return Math.min(Math.round(score), 100);
+    score = Math.min(Math.round(score), 100);
+
+    const v = round2(velocityIncrement);
+    const f = round2(failRateFactor);
+
+    return {
+        score,
+        breakdown: {
+            velocityIncrement: v,
+            endpointWeight,
+            failRateFactor: f,
+            scale: VELOCITY_POINT_SCALE,
+            formula: `${v} x ${endpointWeight} x ${f} x ${VELOCITY_POINT_SCALE} = ${score}`
+        }
+    };
+}
+
+// Rounds a factor to 2 decimal places for display/logging - the raw
+// requestRate math produces long floats (e.g. 3.1972...) that are
+// accurate but unreadable in an audit log or a printed report.
+function round2(n) {
+    return Math.round(n * 100) / 100;
 }
