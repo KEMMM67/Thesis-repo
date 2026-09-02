@@ -56,6 +56,7 @@ model User {
   securityActions SecurityAction[]
   behaviorLogs    BehaviorLog[]
   sessions        Session[]
+  student         Student?
 
   @@map("users")
 }
@@ -143,13 +144,14 @@ model IpTracking {
 // ---------------------------------------------------------------------
 // ACADEMIC RECORDS (basic models)
 // ---------------------------------------------------------------------
-// Deliberately NOT linked to User: the admin dashboard's Student
-// Records is a directory the registrar's office manages (student ID,
-// name, program, standing), which is a different concept from a
-// student's own login account - there is no signup flow today that
-// creates a matching Student row for a new User, and none is added
-// here. Linking the two (e.g. an optional Student.userId) is a
-// reasonable next step, not part of "basic" models.
+// Student.userId links the registrar's record (student ID, name,
+// program, standing) to the login account that owns it, backing the
+// student dashboard's self-service "my profile / my grades" endpoint
+// (GET /api/students/me in server.js). It is optional and unique:
+// optional because a Student row can still exist with no matching
+// login yet (there is no signup flow that provisions both at once),
+// and unique because one login account may correspond to at most one
+// student record.
 model Student {
   id         Int           @id @default(autoincrement())
   studentId  String        @unique @map("student_id") @db.VarChar(20)
@@ -158,6 +160,8 @@ model Student {
   program    String        @default("") @db.VarChar(150)
   yearLevel  String        @default("") @map("year_level") @db.VarChar(50)
   status     StudentStatus @default(ENROLLED)
+  userId     Int?          @unique @map("user_id")
+  user       User?         @relation(fields: [userId], references: [id])
   createdAt  DateTime      @default(now()) @map("created_at")
   updatedAt  DateTime      @updatedAt @map("updated_at")
 

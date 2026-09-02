@@ -46,9 +46,21 @@ const GRADE_SEED = [
   { studentId: 'A23-00001', subjectCode: 'HCI101', term: '1st Semester, 2025-2026', grade: 1.50, remarks: 'Passed' },
 ];
 
-async function seedAcademicRecords() {
+/**
+ * Upserts the demo academic records and links the demo student portal
+ * account to its matching Student row via Student.userId, so
+ * GET /api/students/me (server.js) has a real record to resolve for the
+ * seeded student@example.edu.ph login.
+ *
+ * @param {number} demoStudentUserId - id of the seeded student@example.edu.ph User row.
+ * @returns {Promise<void>}
+ */
+async function seedAcademicRecords(demoStudentUserId) {
   const students = await Promise.all(
-    STUDENT_SEED.map((s) => prisma.student.upsert({ where: { studentId: s.studentId }, update: s, create: s }))
+    STUDENT_SEED.map((s) => {
+      const data = s.studentId === 'A23-00001' ? { ...s, userId: demoStudentUserId } : s;
+      return prisma.student.upsert({ where: { studentId: s.studentId }, update: data, create: data });
+    })
   );
   const subjects = await Promise.all(
     SUBJECT_SEED.map((s) => prisma.subject.upsert({ where: { subjectCode: s.subjectCode }, update: s, create: s }))
@@ -76,7 +88,7 @@ async function main() {
 
   console.log(`Seeded users: ${admin.email} (${admin.role}), ${student.email} (${student.role})`);
 
-  await seedAcademicRecords();
+  await seedAcademicRecords(student.id);
 
   await prisma.loginAttempt.createMany({
     data: [

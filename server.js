@@ -289,6 +289,124 @@ app.get("/api/admin/backup", authMiddleware, requireRole('admin'), securityMiddl
 // every section-open, not sensitive mutations.
 
 /**
+ * @route GET /api/students/me
+ * @access Student
+ * @description Returns the logged-in student's own profile and grades for
+ * the student dashboard (public/student_dashboard.js), replacing the
+ * static per-student content that used to be hardcoded directly into
+ * student_dashboard.html.
+ *
+ * The student is resolved from req.user.email (set by authMiddleware
+ * after verifying the JWT) via Student.userId, never from any
+ * client-supplied id - accepting e.g. a ?studentId= query parameter here
+ * would trade the broken-access-control bug this endpoint exists to fix
+ * for an IDOR (Insecure Direct Object Reference), letting one student
+ * read another's grades by simply changing the parameter. This handler
+ * can only ever return the record belonging to whoever the JWT says is
+ * making the request.
+ *
+ * Schedule, billing, and clearance have no backing persistence model yet
+ * (see the Student/Grade models in prisma/schema.prisma) and are
+ * returned as fixed placeholder values, clearly labeled as such below -
+ * consistent with how GET /api/admin/backup above already treats
+ * students/subjects/grades as forward-compatible placeholders. They are
+ * served from here rather than left hardcoded in student_dashboard.html
+ * so the entire dashboard, not just profile/grades, requires a valid,
+ * authenticated request to view.
+ */
+app.get("/api/students/me", authMiddleware, requireRole('student'), async (req, res) => {
+    try {
+        const user = await prisma.user.findUnique({ where: { email: req.user.email } });
+        const student = user ? await prisma.student.findUnique({ where: { userId: user.id } }) : null;
+
+        if (!student) {
+            return res.status(404).json({
+                success: false,
+                message: "No student record is linked to this account yet. Contact the registrar's office."
+            });
+        }
+
+        const gradeRows = await prisma.grade.findMany({
+            where: { studentId: student.id },
+            include: { subject: true },
+            orderBy: { updatedAt: 'desc' }
+        });
+
+        const grades = gradeRows.map(g => ({
+            subjectCode: g.subject.subjectCode,
+            subjectTitle: g.subject.subjectTitle,
+            units: g.subject.units,
+            term: g.term,
+            grade: g.grade != null ? Number(g.grade) : null,
+            remarks: g.remarks
+        }));
+
+        // Enrolled units and GWA are computed from the real grade rows above
+        // rather than stored as separate fields, so they can never drift out
+        // of sync with the grades that back them. This seed data uses the
+        // Philippine 1.0 (highest) - 5.0 (lowest) grading scale, so the
+        // average is taken directly (no inversion), and 3.00 is the
+        // conventional passing ceiling for "Good Standing".
+        const numericGrades = grades.map(g => g.grade).filter(g => g != null);
+        const enrolledUnits = grades.reduce((sum, g) => sum + (g.units || 0), 0);
+        const gwa = numericGrades.length
+            ? Math.round((numericGrades.reduce((sum, g) => sum + g, 0) / numericGrades.length) * 100) / 100
+            : null;
+        const academicStanding = gwa == null ? 'No Grades Yet' : (gwa <= 3.00 ? 'Good Standing' : 'On Probation');
+
+        // Shared display label for the schedule/grades/billing sections
+        // below - derived from the grade rows' own term rather than
+        // duplicated per section, so it can never disagree with the grades
+        // it is describing.
+        const currentTerm = grades.length ? grades[0].term : 'No Term on File';
+
+        res.json({
+            success: true,
+            currentTerm,
+            profile: {
+                studentId: student.studentId,
+                fullName: student.fullName,
+                department: student.department,
+                program: student.program,
+                yearLevel: student.yearLevel,
+                status: student.status,
+                email: user.email
+            },
+            stats: { enrolledUnits, gwa, academicStanding },
+            grades,
+            // ---- Placeholder sections (see the route description above) ----
+            schedule: [
+                { subjectCode: 'SE301', subjectTitle: 'Software Engineering 1', units: 3, schedule: 'Mon / Wed · 08:00 AM - 09:30 AM', room: 'CCMS Lab 3', instructor: 'Prof. Cruz' },
+                { subjectCode: 'IAS301', subjectTitle: 'Information Assurance & Security', units: 3, schedule: 'Tue / Thu · 01:00 PM - 02:30 PM', room: 'CCMS Lec Rm 2', instructor: 'Prof. Santos' },
+                { subjectCode: 'HCI101', subjectTitle: 'Human-Computer Interaction', units: 3, schedule: 'Friday · 03:30 PM - 06:30 PM', room: 'CCMS Lab 1', instructor: 'Prof. Mendoza' }
+            ],
+            billing: {
+                balanceDue: 0,
+                status: 'Paid in Full',
+                fees: [
+                    { type: 'Tuition Fee', amount: 15000 },
+                    { type: 'Miscellaneous Fee', amount: 2500 },
+                    { type: 'Laboratory Fee', amount: 1000 }
+                ],
+                payments: [
+                    { date: '2026-03-01', orNumber: 'OR-00192', amount: 18500, description: 'Full Tuition Payment' }
+                ]
+            },
+            clearance: [
+                { requirement: 'Library Clearance', office: 'MSEUF Main Library', status: 'Cleared' },
+                { requirement: 'Guidance Clearance', office: 'Guidance Office', status: 'Cleared' },
+                { requirement: 'Departmental Clearance', office: "CCMS Dean's Office", status: 'Cleared' },
+                { requirement: 'Accounting Clearance', office: 'Cashier / Accounting Office', status: 'Cleared' },
+                { requirement: 'Student Affairs Clearance', office: 'Office of Student Affairs', status: 'Cleared' }
+            ]
+        });
+    } catch (err) {
+        console.error("Student self-service fetch error:", err);
+        res.status(500).json({ success: false, message: "Cannot fetch your dashboard data." });
+    }
+});
+
+/**
  * @route GET /api/students
  * @access Admin
  * @description Lists all students for the Student Records table.

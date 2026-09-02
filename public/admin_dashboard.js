@@ -1,6 +1,27 @@
-console.log('[admin_dashboard] Script parsed. Waiting for DOMContentLoaded...');
+// =============================================================
+// ROUTE GUARD (runs immediately - before any DOM wiring below)
+// =============================================================
+// A static HTML file has no gate of its own: unlike an API route,
+// nothing stops a browser from requesting admin_dashboard.html
+// directly without ever logging in. This check is therefore the
+// first thing this script does, so an unauthenticated visitor is
+// sent back to the Admin Portal login immediately rather than being
+// left looking at dashboard chrome.
+//
+// This is defense-in-depth / UX only, not the real security
+// boundary: every /api/* route this dashboard calls independently
+// requires authMiddleware server-side (see middleware/authMiddleware.js
+// and server.js), which verifies the JWT itself and returns 401
+// regardless of what this client-side check does - see authFetch()
+// below, which already redirects on a 401 for the same reason. A
+// missing token is therefore rejected here before the rest of this
+// file - including that redundant 401 path - ever runs.
+if (!localStorage.getItem('authToken')) {
+    window.location.replace('admin_login.html');
+} else {
+    console.log('[admin_dashboard] Script parsed. Waiting for DOMContentLoaded...');
 
-document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', () => {
     console.log('[admin_dashboard] DOMContentLoaded fired. Beginning initialization.');
 
     // =============================================================
@@ -1096,4 +1117,5 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     console.log('[admin_dashboard] Initialization complete.');
-});
+    });
+}
