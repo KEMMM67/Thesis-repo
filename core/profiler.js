@@ -1,9 +1,15 @@
 import { securityConfig } from "../config/securityConfig.js";
 
-// Stores the established behavioral baselines for individual users
+/** Stores each user's learned behavioral baseline. */
 const baselines = {};
 
-// Retrieves the user's historical baseline profile or initializes a default one
+/**
+ * Retrieves a user's baseline profile, initializing a default one on first
+ * access.
+ *
+ * @param {string} user - User identifier.
+ * @returns {{requestRate: number, previousScore: number}}
+ */
 export function getBaseline(user) {
     if (!baselines[user]) {
         baselines[user] = {
@@ -14,14 +20,24 @@ export function getBaseline(user) {
     return baselines[user];
 }
 
-// Adaptive Exponential Moving Average (EMA) Learning
-// Dynamically adjusts the user's baseline profile based on legitimate behavior over time
+/**
+ * Updates a user's baseline request rate using an Exponential Moving
+ * Average (EMA). EMA is used instead of a simple running average because it
+ * weights recent behavior more heavily while still retaining historical
+ * context, letting the baseline adapt to gradual, legitimate changes in a
+ * user's usage pattern without being thrown off by a single outlier
+ * request.
+ *
+ * @param {string} user - User identifier whose baseline is updated.
+ * @param {{requestRate: number}} currentFeatures - Current-request features from core/monitor.js#getFeatures().
+ * @returns {void}
+ */
 export function updateBaseline(user, currentFeatures) {
     const baseline = getBaseline(user);
-    
-    // The 'alpha' constant determines the system's learning rate sensitivity
+
+    // alpha is the learning rate: higher values weight recent behavior more
+    // heavily; lower values make the baseline more resistant to change.
     const alpha = securityConfig.emaAlpha || 0.1;
 
-    // EMA Formula: Incorporates new behavior while retaining historical context
     baseline.requestRate = (currentFeatures.requestRate * alpha) + (baseline.requestRate * (1 - alpha));
 }

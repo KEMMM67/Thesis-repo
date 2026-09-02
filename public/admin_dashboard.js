@@ -8,27 +8,31 @@ document.addEventListener('DOMContentLoaded', () => {
     // =============================================================
     const API_BASE = 'http://localhost:3000';
 
-    // Escapes text before it goes into innerHTML, so data that
-    // ultimately traces back to user input (a log's user_email is
-    // whatever someone typed into the login form; a prompt() value
-    // is typed directly by this admin) can never be interpreted as
-    // markup.
+    /**
+     * Escapes text for safe insertion into innerHTML. Applied to all
+     * data that ultimately traces back to user input (e.g. a log's
+     * user_email, or an admin-entered prompt value).
+     *
+     * @param {*} str - Value to escape.
+     * @returns {string} HTML-escaped string.
+     */
     function escapeHtml(str) {
         const div = document.createElement('div');
         div.textContent = str == null ? '' : String(str);
         return div.innerHTML;
     }
 
-    // Explainable Score UI (SE traceability requirement): every
-    // SECURITY_EVALUATION log's description now arrives from
-    // middleware/securityMiddleware.js formatted as
-    // "<narrative> | <formula>" (see core/scorer.js's computeScore()
-    // for where the formula comes from). Splitting on that one fixed
-    // delimiter - no regex, nothing fragile - separates the two so the
-    // formula can be styled distinctly instead of buried in a wall of
-    // prose. Logs that predate this feature, or don't carry a formula
-    // (e.g. LOGIN_SUCCESS), simply have no " | " to split on and render
-    // exactly as before.
+    /**
+     * Renders a security log's description, splitting the itemized WEVA
+     * formula (see core/scorer.js#computeScore) from its narrative so the
+     * formula can be styled distinctly instead of buried in prose.
+     * middleware/securityMiddleware.js formats SECURITY_EVALUATION
+     * descriptions as "<narrative> | <formula>"; entries without that
+     * fixed " | " delimiter (e.g. LOGIN_SUCCESS) render unchanged.
+     *
+     * @param {string} description - Raw log description.
+     * @returns {string} HTML-safe markup for the log description cell.
+     */
     function renderLogDescription(description) {
         const text = description || '';
         const sepIndex = text.indexOf(' | ');
@@ -39,13 +43,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${escapeHtml(narrative)}<br><code class="score-formula">${escapeHtml(formula)}</code>`;
     }
 
-    // Same device-fingerprint computation script.js runs at login,
-    // duplicated here rather than shared: admin_dashboard.html has
-    // always been a self-contained page (no <script src="script.js">),
-    // and script.js assumes a #loginForm exists on the page it's
-    // loaded into, so it can't just be included as-is. Recomputed on
-    // every call rather than cached - it's a pure, practically-free
-    // local computation (no network I/O), same as the login flow.
+    /**
+     * Derives the same per-device fingerprint as public/script.js.
+     * Duplicated rather than imported, since this page is self-contained
+     * and script.js assumes a #loginForm exists on its host page.
+     * Recomputed on each call - a cheap, pure, local computation.
+     *
+     * @returns {Promise<string>} Device identifier, prefixed "DEV-".
+     */
     async function getDeviceFingerprint() {
         const data = [
             navigator.userAgent,
@@ -64,43 +69,37 @@ document.addEventListener('DOMContentLoaded', () => {
         return "DEV-" + Math.abs(hash).toString(16);
     }
 
-    // Clears the stored session and sends the admin back to the
-    // Admin Portal login page - not index.html, which is the
-    // *student* portal now that logins are split. Used for "never
-    // logged in", "server rejected the token" (401/403 - see
-    // authFetch() below), and manual Logout clicks.
+    /**
+     * Clears the stored session and redirects to the Admin Portal login
+     * page. Used on missing/expired sessions and manual logout.
+     *
+     * @returns {void}
+     */
     function goToLogin() {
         localStorage.removeItem('authToken');
         localStorage.removeItem('userEmail');
         window.location.href = 'admin_login.html';
     }
 
-    // Every fetch() against an authMiddleware-protected route goes
-    // through here instead of calling fetch() directly, so token
-    // attachment, device telemetry, and session-expiry handling
-    // only need to be correct in one place. Two headers go on
-    // every call:
-    //   - Authorization: Bearer <token>  - who authMiddleware and
-    //     requireRole believe you are.
-    //   - x-device-id                    - the same behavioral
-    //     signal the login form sends, so securityMiddleware's
-    //     velocity and endpoint-weight scoring (core/scorer.js)
-    //     can attribute these authenticated admin actions to a
-    //     device too, not just login attempts.
-    //
-    // A missing token or a rejected token (401 - expired/invalid)
-    // instantly clears the session and sends the admin back to
-    // admin_login.html. 403 is deliberately NOT handled the same
-    // way anymore: it used to mean only "wrong role" (requireRole),
-    // but now that this dashboard can trigger WEVA's own BLOCK
-    // mitigation on purpose (see the Simulate Attack demo below),
-    // 403 just as often means "this device is temporarily
-    // rate-limited by the system you're demonstrating" - an
-    // expected, informative outcome, not a reason to force a
-    // logout mid-demo. It's returned as-is, same as 400/429/
-    // success, so the caller (submitAction/showResult, or the
-    // demo's own status line) can read and show the server's real
-    // message.
+    /**
+     * Wraps `fetch()` for every authMiddleware-protected route, attaching
+     * the bearer token and device telemetry, and centralizing
+     * session-expiry handling.
+     *
+     * `x-device-id` carries the same behavioral signal the login form
+     * sends, so securityMiddleware's scoring can attribute authenticated
+     * admin actions to a device, not just login attempts. A missing or
+     * rejected (401) token immediately clears the session and redirects
+     * to login. 403 is returned as-is rather than treated as a forced
+     * logout: since this dashboard can deliberately trigger WEVA's BLOCK
+     * verdict (see the Simulate Attack demo), a 403 here often means
+     * "this device is currently rate-limited," an expected outcome the
+     * caller should display, not a session failure.
+     *
+     * @param {string} path - API path relative to API_BASE.
+     * @param {RequestInit} [options] - Additional fetch options.
+     * @returns {Promise<Response>}
+     */
     async function authFetch(path, options = {}) {
         const token = localStorage.getItem('authToken');
 
@@ -128,11 +127,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return response;
     }
 
-    // Runs an authFetch() call and parses its JSON body, converting
-    // a network/connection failure into the same {success, message}
-    // shape every real server response already uses - so callers
-    // only ever need to handle one case instead of a try/catch on
-    // top of every button handler.
+    /**
+     * Runs an `authFetch()` call and parses its JSON body, normalizing a
+     * network failure into the same `{success, message}` shape every
+     * server response already uses.
+     *
+     * @param {string} path - API path relative to API_BASE.
+     * @param {RequestInit} [options] - Additional fetch options.
+     * @returns {Promise<{success: boolean, message?: string}>}
+     */
     async function submitAction(path, options) {
         try {
             const response = await authFetch(path, options);
@@ -142,19 +145,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Every route this dashboard talks to returns {success,
-    // message} - on success AND on failure - so one tiny helper
-    // covers all of them.
+    /**
+     * Displays a server response's `message` field to the admin.
+     *
+     * @param {{message?: string}} data - Response body from submitAction().
+     * @returns {void}
+     */
     function showResult(data) {
         alert((data && data.message) ? data.message : 'Something went wrong.');
     }
 
-    // fetchLogs() lives up here (not inside the SECURITY LOGS try
-    // block below) so it's in scope for both the sidebar nav's
-    // "switched to Security & Logs -> refresh" call and the
-    // refresh button's listener, without relying on it ever being
-    // attached to `window` - see the SECURITY LOGS section for why
-    // that matters.
+    /**
+     * Fetches and renders the Security Logs table. Declared at top level
+     * so both the sidebar navigation handler and the refresh button can
+     * call it.
+     *
+     * @returns {Promise<void>}
+     */
     async function fetchLogs() {
         const tableBody = document.getElementById('logsTableBody');
         try {
@@ -187,24 +194,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Same reasoning as fetchLogs() above for living up here rather
-    // than inside the BLOCKED DEVICES try block below: the sidebar nav
-    // handler calls this when Admin Settings is opened, so it needs to
-    // be in scope there too.
-    //
-    // Builds each row via document.createElement + a real DOM property
-    // assignment for the device identifier (row.dataset.identifier =
-    // ...), NOT by interpolating it into the innerHTML template string.
-    // That distinction matters here specifically: a device identifier
-    // is core/monitor.js's deviceId, which traces back to the
-    // client-supplied x-device-id header (see public/script.js's
-    // getDeviceFingerprint()) - attacker-controlled input that's
-    // already made it into the database via ipTracking. escapeHtml()
-    // is safe for TEXT content but does not escape quote characters,
-    // so embedding it inside a "..."-quoted HTML attribute could let a
-    // crafted device id break out of the attribute. Setting it via the
-    // DOM property instead sidesteps that whole class of bug rather
-    // than trying to out-escape it.
+    /**
+     * Fetches and renders the Blocked Devices table. Declared at top
+     * level so the sidebar navigation handler can call it.
+     *
+     * Each row's device identifier is assigned via the DOM property
+     * `row.dataset.identifier`, not interpolated into the innerHTML
+     * template string. The identifier traces back to the client-supplied
+     * `x-device-id` header - untrusted input already persisted via
+     * ipTracking - and escapeHtml() does not escape quote characters, so
+     * interpolating it into a quoted HTML attribute could allow it to
+     * break out of the attribute. Assigning it as a DOM property avoids
+     * that class of injection entirely.
+     *
+     * @returns {Promise<void>}
+     */
     async function fetchBlockedDevices() {
         const tableBody = document.getElementById('blockedDevicesTableBody');
         if (!tableBody) return;
@@ -241,21 +245,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // studentId/subjectCode-keyed status->badge mapping, used only by
-    // renderStudentsTable() below.
+    /**
+     * @param {string} status - Student status value.
+     * @returns {string} Badge class for the given status.
+     */
     function studentBadgeClass(status) {
         if (status === 'DROPPED') return 'bg-danger';
         if (status === 'IRREGULAR') return 'bg-warning';
         return 'bg-success';
     }
 
-    // Renders the WHOLE Student Records table from a students array -
-    // used both for the initial load and for every refresh after an
-    // Add/Edit (see loadStudents() and the STUDENT RECORDS section
-    // below). One render function for both cases, rather than a
-    // separate "append one row" path for Add and "patch cells in
-    // place" path for Edit, means the table can never drift from
-    // whatever the server actually persisted.
+    /**
+     * Renders the full Student Records table from a students array. Used
+     * for both the initial load and every post-mutation refresh, so the
+     * table can never drift from what the server actually persisted.
+     *
+     * @param {Array<object>} students - Student records to render.
+     * @returns {void}
+     */
     function renderStudentsTable(students) {
         const tableBody = document.getElementById('studentsTableBody');
         if (!tableBody) return;
@@ -280,10 +287,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Fetches GET /api/students (real, persisted rows - server.js,
-    // backed by the Student model in prisma/schema.prisma) and renders
-    // them. Lives up here, hoisted, so the sidebar nav handler below
-    // can call it when Student Records is opened.
+    /**
+     * Fetches and renders the Student Records table. Declared at top
+     * level so the sidebar navigation handler can call it.
+     *
+     * @returns {Promise<void>}
+     */
     async function loadStudents() {
         const tableBody = document.getElementById('studentsTableBody');
         if (!tableBody) return;
@@ -301,7 +310,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Same pattern as students, for the Subject Catalog table.
+    /**
+     * Renders the full Subject Catalog table from a subjects array.
+     * Mirrors renderStudentsTable() above.
+     *
+     * @param {Array<object>} subjects - Subject records to render.
+     * @returns {void}
+     */
     function renderSubjectsTable(subjects) {
         const tableBody = document.getElementById('subjectsTableBody');
         if (!tableBody) return;
@@ -324,6 +339,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    /**
+     * Fetches and renders the Subject Catalog table.
+     *
+     * @returns {Promise<void>}
+     */
     async function loadSubjects() {
         const tableBody = document.getElementById('subjectsTableBody');
         if (!tableBody) return;
@@ -346,12 +366,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // =============================================================
     // ACCOUNT MENU (topbar dropdown: Admin Settings shortcut + Logout)
     // =============================================================
-    // Replaces the old standalone, half-dead "Settings" link
-    // (href="#", never wired to anything) and bare "Logout" link with
-    // one clickable gear-icon trigger and a real dropdown - #btnLogout
-    // keeps its exact id from before (just moved from an <a> to a
-    // <button> inside the panel), so nothing else needs to change to
-    // keep it working.
     try {
         console.log('[admin_dashboard] Wiring account menu...');
         const btnAccountMenu = document.getElementById('btnAccountMenu');
@@ -374,7 +388,6 @@ document.addEventListener('DOMContentLoaded', () => {
             btnAccountMenu.setAttribute('aria-expanded', String(!isOpen));
         });
 
-        // Close on any click outside the menu, and on Escape.
         document.addEventListener('click', (e) => {
             if (!accountMenuPanel.hidden && !accountMenuPanel.contains(e.target) && e.target !== btnAccountMenu) {
                 closeAccountMenu();
@@ -387,11 +400,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btnGoToSettings) {
             btnGoToSettings.addEventListener('click', () => {
                 closeAccountMenu();
-                // Reuse the sidebar's own admin-settings <li> click
-                // rather than duplicating what happens when you
-                // navigate there (active state, title, the Blocked
-                // Devices auto-fetch) - one source of truth for that
-                // logic instead of two copies that could drift apart.
+                // Reuses the sidebar's own admin-settings click handler as
+                // the single source of truth for navigation state.
                 const settingsNavItem = document.querySelector('#sidebar-nav li[data-section="section-admin-settings"]');
                 if (settingsNavItem) settingsNavItem.click();
             });
@@ -463,9 +473,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!canvas) throw new Error('#anomalyChart not found in the DOM.');
         const ctx = canvas.getContext('2d');
 
-        // Threshold lines mirror config/securityConfig.js's actual
-        // defaults (suspicious=25, critical/throttle=60, block=85) -
-        // see core/decisionEngine.js for how they're applied.
+        // Mirrors config/securityConfig.js's thresholds (suspicious=25,
+        // critical/throttle=60, block=85); see core/decisionEngine.js.
         const THRESHOLDS = [
             { value: 25, label: 'LOG', color: '#b9660b' },
             { value: 60, label: 'THROTTLE', color: '#e0651e' },
@@ -475,11 +484,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let scoreHistory = [];
 
-        // Sizes the canvas's actual pixel buffer to match its rendered
-        // CSS size (times devicePixelRatio), so lines/text stay crisp
-        // instead of blurring - a plain width/height HTML attribute
-        // would render at a fixed resolution regardless of how large
-        // the element actually displays.
+        /**
+         * Sizes the canvas's pixel buffer to its rendered CSS size scaled
+         * by devicePixelRatio, keeping lines and text crisp on high-DPI
+         * displays.
+         *
+         * @returns {void}
+         */
         function resizeCanvas() {
             const dpr = window.devicePixelRatio || 1;
             const rect = canvas.getBoundingClientRect();
@@ -555,9 +566,14 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Deliberately hits authFetch(), not submitAction(): a failed
-        // poll should stay silent (console only) rather than pop an
-        // alert() every 1.5 seconds if the network hiccups.
+        /**
+         * Polls recent anomaly scores and redraws the chart. Uses
+         * authFetch() directly rather than submitAction(), so a failed
+         * poll logs to the console instead of surfacing an alert() every
+         * 1.5 seconds.
+         *
+         * @returns {Promise<void>}
+         */
         async function pollScores() {
             try {
                 const response = await authFetch('/api/admin/scores');
@@ -596,11 +612,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return new Promise(resolve => setTimeout(resolve, ms));
         }
 
-        // Fires one POST /api/demo/ping (same authMiddleware ->
-        // requireRole('admin') -> securityMiddleware chain as every
-        // real action) and resolves to its HTTP status, never
-        // throwing - one failed ping should never stop the rest of
-        // the burst.
+        /**
+         * Fires one POST /api/demo/ping through the full security
+         * middleware chain. Never throws, so one failed ping does not
+         * abort the rest of the burst.
+         *
+         * @returns {Promise<number>} HTTP status code, or 0 on network failure.
+         */
         async function sendPing() {
             try {
                 const response = await authFetch('/api/demo/ping', { method: 'POST' });
@@ -616,43 +634,26 @@ document.addEventListener('DOMContentLoaded', () => {
             demoStatus.textContent = 'Sending an escalating burst through the WEVA pipeline...';
 
             try {
-                // Stage 1: a handful of pings spaced 120ms apart, purely
-                // so the chart shows one clean, isolated LOG-level flag
-                // before the spike - narratable on its own ("here's a
-                // mild anomaly").
+                // Stage 1: a small number of spaced-out pings, so the
+                // chart first shows one isolated LOG-level flag before
+                // the spike.
                 for (let i = 0; i < 4; i++) {
                     sendPing();
                     await wait(120);
                 }
 
-                // Stage 2: a genuinely CONCURRENT burst - every ping
-                // fired in the same tick via Promise.all, not spaced
-                // out one at a time. This isn't just style: an earlier
-                // version of this feature spaced every ping out with a
-                // shrinking-but-still-real gap, and testing it against
-                // the real server showed the score climbing for a few
-                // requests and then plateauing and *falling* - because
-                // core/profiler.js's EMA baseline (alpha=0.1) updates on
-                // every single request and adapts toward whatever rate
-                // it observes, so a long, evenly-paced burst gives it
-                // just enough time to "learn" the elevated pace as the
-                // new normal before the score can climb far, exactly as
-                // an adaptive baseline should for genuinely sustained
-                // behavior. A short, truly simultaneous spike outruns
-                // that adaptation instead of feeding it: Node still
-                // processes each of these one at a time internally, so
-                // the score climbs through MEDIUM/HIGH as the batch is
-                // worked through and crosses BLOCK before the baseline
-                // gets enough update cycles to catch up.
-                //
-                // 50 pings, not fewer: dispatch concurrency has real
-                // run-to-run variance (connection pooling, OS/browser
-                // scheduling - confirmed empirically while building
-                // this, where identical code sometimes reached BLOCK
-                // with room to spare and sometimes fell just short at a
-                // smaller batch size), so this number carries a
-                // deliberate safety margin for a live, one-shot demo
-                // rather than the bare minimum that worked once.
+                // Stage 2: a genuinely concurrent burst. core/profiler.js's
+                // EMA baseline (alpha=0.1) adapts toward whatever request
+                // rate it observes, so a burst spaced out over time gives
+                // it enough update cycles to "learn" the elevated pace as
+                // normal before the score can climb far. Firing every
+                // request in the same tick via Promise.all outruns that
+                // adaptation instead of feeding it, letting the score
+                // climb through MEDIUM/HIGH and cross BLOCK. The batch
+                // size (50) carries a deliberate safety margin: dispatch
+                // concurrency has measurable run-to-run variance (e.g.
+                // connection pooling, scheduler timing), and a smaller
+                // batch was observed to fall short of BLOCK on some runs.
                 const pending = Array.from({ length: 50 }, () => sendPing());
                 const statuses = await Promise.all(pending);
 
@@ -695,13 +696,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // =============================================================
     // PRINTABLE AUDIT REPORT
     // =============================================================
-    // Fulfils a Non-Functional Requirement (business/compliance
-    // reporting), not a feature request in the functional sense - the
-    // system needs to be able to hand an auditor a static, dated
-    // artifact, not just a live dashboard. window.print() (with the
-    // browser's own "Save as PDF" option) is a native capability;
-    // style.css's @media print block does the actual formatting, this
-    // just stamps a real generation timestamp before invoking it.
+    // Supports a compliance/reporting requirement: a static, dated
+    // artifact an auditor can be handed, distinct from the live
+    // dashboard. window.print() is a native browser capability;
+    // style.css's @media print block performs the formatting, and this
+    // handler only stamps a real generation timestamp before invoking it.
     try {
         console.log('[admin_dashboard] Wiring printable audit report...');
         const btnGenerateReport = document.getElementById('btnGenerateReport');
@@ -720,7 +719,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =============================================================
-    // BLOCKED DEVICES PANEL (Priority #5: persistent mitigation)
+    // BLOCKED DEVICES PANEL
     // =============================================================
     try {
         console.log('[admin_dashboard] Wiring Blocked Devices panel...');
@@ -731,9 +730,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         btnRefreshBlockedDevices.addEventListener('click', fetchBlockedDevices);
 
-        // Delegated listener (same pattern as the Student/Subject CRUD
-        // tables above): handles every row's Force Logout / Revoke
-        // button, including rows rendered by a later refresh.
+        // Delegated listener: handles every row's Force Logout / Revoke
+        // button, including rows added by a later refresh.
         blockedDevicesTableBody.addEventListener('click', async (e) => {
             const btn = e.target.closest('button[data-action="revoke"]');
             if (!btn) return;
@@ -757,17 +755,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =============================================================
-    // DATABASE BACKUP (real, working Disaster Recovery export)
+    // DATABASE BACKUP
     // =============================================================
-    // Hits GET /api/admin/backup (server.js), which exports every table
-    // this schema currently models - see that route's own comment for
-    // exactly what is and isn't included, and why (students/subjects/
-    // grades don't exist as persisted records yet; passwordHash and the
-    // Session table are deliberately excluded on security grounds, not
-    // technical ones). Everything below is pure client-side file
-    // handling: a Blob + a programmatically-clicked, immediately-
-    // revoked <a download> is the standard vanilla-JS way to trigger a
-    // browser download from fetched data - no library needed.
+    // Fetches GET /api/admin/backup (see server.js for exactly what is
+    // included and why) and triggers a browser download via a Blob and a
+    // programmatically-clicked, immediately-revoked <a download> link -
+    // the standard client-side approach for saving fetched data to a file.
     try {
         console.log('[admin_dashboard] Wiring database backup...');
         const btnBackupDatabase = document.getElementById('btnBackupDatabase');
@@ -839,11 +832,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!studentModal) throw new Error('#studentModal not found in the DOM.');
         if (!studentForm) throw new Error('#studentForm not found in the DOM.');
 
-        // mode: 'add' | 'edit'. student is only read when mode is
-        // 'edit'. studentId is made read-only in edit mode - it's the
-        // stable lookup key PUT /api/students/:id, and this row's own
-        // data-id, are both keyed by; changing it here would silently
-        // desync the row from the record it's supposed to represent.
+        /**
+         * Opens the Add/Edit Student modal. In edit mode, studentId is
+         * made read-only, since it is the stable lookup key both
+         * PUT /api/students/:id and this row's own data-id are keyed by.
+         *
+         * @param {'add'|'edit'} mode
+         * @param {object} [student] - Existing student data, required when mode is 'edit'.
+         * @returns {void}
+         */
         function openStudentModal(mode, student) {
             studentForm.reset();
             studentForm.dataset.mode = mode;
@@ -872,10 +869,6 @@ document.addEventListener('DOMContentLoaded', () => {
         btnCloseStudentModal.addEventListener('click', () => studentModal.close());
         btnCancelStudentModal.addEventListener('click', () => studentModal.close());
 
-        // Native required/minlength validation runs before this fires
-        // (invalid forms never emit submit), so no manual
-        // "is it empty" checks are needed here the way the old
-        // prompt()-based flow needed them.
         studentForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const mode = studentForm.dataset.mode;
@@ -905,14 +898,12 @@ document.addEventListener('DOMContentLoaded', () => {
             showResult(data);
             if (data.success) {
                 studentModal.close();
-                loadStudents(); // re-fetch rather than patch the DOM by
-                                 // hand, so the table can never drift
-                                 // from what the server actually saved.
+                loadStudents(); // re-fetch so the table matches the server's saved state exactly
             }
         });
 
-        // Delegated listener handles every row's Edit/Remove buttons,
-        // including rows rendered by a later loadStudents() refresh.
+        // Delegated listener: handles every row's Edit/Remove buttons,
+        // including rows added by a later loadStudents() refresh.
         studentsTableBody.addEventListener('click', async (e) => {
             const btn = e.target.closest('button[data-action]');
             if (!btn) return;
@@ -945,7 +936,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =============================================================
-    // SUBJECT MANAGEMENT (mirrors Student Records above exactly)
+    // SUBJECT MANAGEMENT (mirrors Student Records above)
     // =============================================================
     try {
         console.log('[admin_dashboard] Wiring Subject Management...');
@@ -1056,10 +1047,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // =============================================================
     // CREATE ADMIN ACCOUNT (User Roles Management)
     // =============================================================
-    // "Create New Admin Account" in the User Roles Management group
-    // used to be a dead button with no listener at all - now opens the
-    // Create Admin modal and posts to POST /api/admin/accounts
-    // (server.js), weighted at the maximum 4x tier in core/scorer.js.
+    // Posts to POST /api/admin/accounts (server.js), weighted at the
+    // maximum 4x sensitivity tier in core/scorer.js.
     try {
         console.log('[admin_dashboard] Wiring Create Admin Account...');
         const btnCreateAdmin = document.getElementById('btnCreateAdmin');

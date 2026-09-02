@@ -1,0 +1,124 @@
+import nodemailer from "nodemailer";
+
+/**
+ * @fileoverview Best-effort email notification service.
+ *
+ * Login alerts are defense-in-depth alongside the WEVA behavioral layer
+ * (core/scorer.js, middleware/securityMiddleware.js): WEVA's job is to
+ * stop a high-velocity brute-force burst before it succeeds, but it has
+ * nothing to say about a *slow*, low-and-slow credential-stuffing attempt
+ * that never crosses a velocity threshold yet still lands on the right
+ * password eventually. Notifying the account owner on every successful
+ * login surfaces exactly that case to the one person positioned to
+ * recognize "that wasn't me" and act on it.
+ *
+ * Every export in this module is written to never throw or reject: a
+ * misconfigured mail account, an offline SMTP server, or a network
+ * timeout must never fail the login request that triggered the alert, or
+ * a legitimate user could be locked out of their own account by an
+ * unrelated mail-delivery problem.
+ */
+
+/**
+ * Nodemailer transporter for Gmail SMTP, authenticated with a Google
+ * App Password (not the account's login password - see
+ * https://myaccount.google.com/apppasswords). Constructing a transporter
+ * does not itself open a connection or validate credentials; both happen
+ * lazily on the first sendMail() call, so a bad SMTP_APP_PASSWORD surfaces
+ * as a caught error in sendLoginAlert() below, not at server startup.
+ */
+const transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    auth: {
+        user: process.env.SMTP_EMAIL,
+        pass: process.env.SMTP_APP_PASSWORD
+    }
+});
+
+/**
+ * Builds the HTML body of a new-login security alert. Styles are inlined
+ * throughout rather than placed in a `<style>` block, since most email
+ * clients (Gmail's web client included) strip non-inline `<style>` rules.
+ *
+ * @param {string} userEmail - Email address of the account that signed in.
+ * @param {string} ipAddress - Originating IP address of the login.
+ * @param {string} timestamp - Human-readable timestamp of the login event.
+ * @returns {string} Self-contained HTML email body.
+ */
+function buildLoginAlertHtml(userEmail, ipAddress, timestamp) {
+    return `
+    <div style="background-color:#f4f6f9;padding:32px 16px;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+        <table role="presentation" width="100%" style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:8px;overflow:hidden;border:1px solid #e2e5ea;">
+            <tr>
+                <td style="background-color:#8b0000;padding:20px 28px;">
+                    <span style="color:#ffffff;font-size:16px;font-weight:700;letter-spacing:0.5px;">STUDENT INFORMATION SYSTEM</span>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding:28px;">
+                    <h2 style="margin:0 0 12px;font-size:18px;color:#1a1a1a;">New Sign-In to Your Account</h2>
+                    <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#444;">
+                        We detected a successful login to the account <strong>${userEmail}</strong>.
+                        If this was you, no action is needed.
+                    </p>
+                    <table role="presentation" width="100%" style="background:#f8f9fb;border:1px solid #e2e5ea;border-radius:6px;font-size:13px;color:#333;">
+                        <tr>
+                            <td style="padding:12px 16px;font-weight:600;width:120px;">Time</td>
+                            <td style="padding:12px 16px;">${timestamp}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:12px 16px;font-weight:600;border-top:1px solid #e2e5ea;">IP Address</td>
+                            <td style="padding:12px 16px;border-top:1px solid #e2e5ea;">${ipAddress}</td>
+                        </tr>
+                    </table>
+                    <p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#666;">
+                        <strong>Didn't sign in?</strong> Your password may be compromised. Contact your
+                        system administrator immediately so the account and device can be reviewed and,
+                        if necessary, blocked.
+                    </p>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding:16px 28px;background:#f8f9fb;border-top:1px solid #e2e5ea;">
+                    <span style="font-size:11px;color:#999;">This is an automated security notification. Please do not reply to this email.</span>
+                </td>
+            </tr>
+        </table>
+    </div>`;
+}
+
+/**
+ * Sends a "new login" security alert to the account owner. Fire-and-forget
+ * by design: callers should invoke this without `await`ing it so an SMTP
+ * round trip never adds latency to the login response, and every failure
+ * mode (bad credentials, DNS failure, timeout, provider rejection) is
+ * caught here and logged rather than propagated - this function always
+ * resolves and never rejects.
+ *
+ * @param {string} userEmail - Email address of the account that signed in; also the alert recipient.
+ * @param {string} ipAddress - Originating IP address of the login attempt.
+ * @returns {Promise<void>}
+ */
+export async function sendLoginAlert(userEmail, ipAddress) {
+    if (!process.env.SMTP_EMAIL || !process.env.SMTP_APP_PASSWORD) {
+        console.warn("[emailService] SMTP_EMAIL/SMTP_APP_PASSWORD not configured - skipping login alert.");
+        return;
+    }
+
+    try {
+        const timestamp = new Date().toLocaleString("en-PH", { dateStyle: "full", timeStyle: "long" });
+
+        await transporter.sendMail({
+            from: `"SIS Security" <${process.env.SMTP_EMAIL}>`,
+            to: userEmail,
+            subject: "New Sign-In to Your SIS Account",
+            html: buildLoginAlertHtml(userEmail, ipAddress, timestamp)
+        });
+
+        console.log(`[emailService] Login alert sent to ${userEmail}.`);
+    } catch (err) {
+        console.error(`[emailService] Failed to send login alert to ${userEmail}:`, err.message);
+    }
+}

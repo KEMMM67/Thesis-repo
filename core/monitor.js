@@ -1,13 +1,23 @@
 import { securityConfig } from "../config/securityConfig.js";
 
-// In-memory tracker for active user request timestamps
+/** In-memory tracker of per-user request timestamps and login-attempt counts. */
 const activeUsers = {};
 
-// Extracts the user's current behavioral features (Speed and Frequency)
+/**
+ * Derives a user's current behavioral features - request velocity and
+ * outstanding login attempts - for input to core/scorer.js.
+ *
+ * Velocity is expressed in requests/second rather than requests/ms so that
+ * the Weighted Endpoint & Velocity Algorithm operates on human-readable
+ * values (e.g. "3.3 req/sec") without altering the underlying ratio.
+ *
+ * @param {string} user - User identifier (or device identifier for pre-auth requests).
+ * @param {string} endpoint - Normalized endpoint path of the current request.
+ * @returns {{requestRate: number, loginAttempts: number, endpoint: string}}
+ */
 export function getFeatures(user, endpoint) {
     const now = Date.now();
 
-    // Initialize tracking for new users
     if (!activeUsers[user]) {
         activeUsers[user] = {
             requests: [],
@@ -17,15 +27,10 @@ export function getFeatures(user, endpoint) {
 
     const userData = activeUsers[user];
 
-    // Remove obsolete request data that falls outside the defined time window
+    // Drop timestamps outside the scoring window so velocity reflects
+    // recent behavior only.
     userData.requests = userData.requests.filter(time => now - time < securityConfig.windowMs);
 
-    // Calculate the current request velocity, expressed in requests-per-SECOND.
-    // (Requests-per-millisecond was mathematically fine but produced tiny
-    // fractional numbers - e.g. 0.0033 - that are awkward to reason about.
-    // Multiplying by 1000 keeps the exact same relative math while giving
-    // the Weighted Endpoint & Velocity Algorithm in core/scorer.js a
-    // human-readable input, e.g. "3.3 req/sec".)
     let rate = 0;
     if (userData.requests.length > 1) {
         const timeDiff = now - userData.requests[0];
@@ -35,31 +40,42 @@ export function getFeatures(user, endpoint) {
     return {
         requestRate: rate,
         loginAttempts: userData.loginAttempts,
-        // Surfaced so core/scorer.js can look up this endpoint's
-        // Endpoint Sensitivity Weight without securityMiddleware.js
-        // needing to change its computeScore() call at all.
         endpoint
     };
 }
 
-// Logs incoming requests to update the user's current tracking state
+/**
+ * Records the current request against the user's tracking state, updating
+ * the request history used for velocity calculation and, for login
+ * endpoints, the outstanding-attempt counter consumed by the scorer's fail
+ * rate factor.
+ *
+ * @param {string} user - User identifier (or device identifier for pre-auth requests).
+ * @param {string} endpoint - Endpoint path of the current request.
+ * @returns {void}
+ */
 export function updateFeatures(user, endpoint) {
     const now = Date.now();
-    
+
     if (!activeUsers[user]) {
         activeUsers[user] = { requests: [], loginAttempts: 0 };
     }
 
-    // Record the timestamp of the current request
     activeUsers[user].requests.push(now);
 
-    // Increment attempt counter if the user targets the login endpoint
     if (endpoint.includes('login')) {
         activeUsers[user].loginAttempts += 1;
     }
 }
 
-// Clears the tracking state upon successful authentication or penalty expiration
+/**
+ * Clears a user's tracked request history and login-attempt count,
+ * typically invoked on successful authentication so past failures no
+ * longer contribute to the anomaly score.
+ *
+ * @param {string} user - User identifier to reset.
+ * @returns {void}
+ */
 export function resetFeatures(user) {
     if (activeUsers[user]) {
         activeUsers[user].loginAttempts = 0;

@@ -871,17 +871,32 @@ dialog.app-modal::backdrop {
 .print-letterhead { display: none; }
 
 @media print {
-    .topbar, .sidebar, .search-bar, .btn-row, .table-actions,
+    .topbar, .sidebar, .search-bar, .btn-row, .table-actions, .filter-bar,
     .chart-canvas-wrap, .cards-container, .chart-placeholder,
     #demoStatus, #main-title {
         display: none !important;
     }
 
-    body, .wrapper, .content, .section-container {
+    /* .section-container is deliberately NOT forced to display:block here:
+       each dashboard's sidebar nav already tracks exactly one section as
+       visible via inline style (see student_dashboard.js / admin_dashboard.js),
+       and every other section already sits at its default display:none
+       (see the .section-container rule above). Forcing every section to
+       display:block would print all of them stacked together regardless
+       of which tab was open when Print was clicked. */
+    body, .wrapper, .content {
         display: block !important;
         height: auto !important;
         overflow: visible !important;
         width: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        box-shadow: none !important;
+        border: none !important;
+        background: #fff !important;
+    }
+
+    .section-container {
         margin: 0 !important;
         padding: 0 !important;
         box-shadow: none !important;

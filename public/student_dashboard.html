@@ -13,7 +13,7 @@
         <div class="logo"><i class="fa-solid fa-graduation-cap"></i> STUDENT INFORMATION SYSTEM</div>
         <div class="user-info">
             <span class="user-chip"><i class="fa-solid fa-user-graduate"></i> Khynne Mark Elmer <span class="role-tag">STUDENT</span></span>
-            <a href="index.html"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
+            <a href="index.html" id="btnLogout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
         </div>
     </div>
 
@@ -106,7 +106,7 @@
                     <select>
                         <option>1st Semester, 2025-2026</option>
                     </select>
-                    <button><i class="fa-solid fa-print"></i> Print Report</button>
+                    <button id="btnPrintGrades"><i class="fa-solid fa-print"></i> Print Report</button>
                 </div>
                 <table>
                     <thead>
@@ -171,24 +171,6 @@
         </div>
     </div>
 
-    <script>
-        const sidebarNav = document.getElementById('sidebar-nav');
-        const mainTitle = document.getElementById('main-title');
-        const sectionContainers = document.querySelectorAll('.section-container');
-
-        sidebarNav.addEventListener('click', (e) => {
-            const clickedLink = e.target.closest('li');
-            if (!clickedLink) return;
-
-            sidebarNav.querySelectorAll('li').forEach(li => li.classList.remove('active'));
-            clickedLink.classList.add('active');
-
-            sectionContainers.forEach(container => container.style.display = 'none');
-            const targetSectionId = clickedLink.dataset.section;
-            document.getElementById(targetSectionId).style.display = 'block';
-
-            mainTitle.innerText = clickedLink.innerText;
-        });
-    </script>
+    <script src="student_dashboard.js"></script>
 </body>
 </html>

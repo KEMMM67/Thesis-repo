@@ -57,7 +57,7 @@
                 <h2>1. Traditional (3-Strike)</h2>
                 <p class="desc">Blocks the user completely after 3 failed clicks, regardless of speed.</p>
                 <div class="status-box" id="status-trad">STATUS: WAITING</div>
-                <button class="btn-test" id="btn-trad" onclick="testTraditional()">Simulate Login Click</button>
+                <button class="btn-test" id="btn-trad">Simulate Login Click</button>
                 <div class="logs" id="log-trad"></div>
             </div>
 
@@ -65,7 +65,7 @@
                 <h2>2. Rule-Based (Static Limit)</h2>
                 <p class="desc">Strictly blocks if user clicks more than 2 times in one second (False Positive Prone).</p>
                 <div class="status-box" id="status-rule">STATUS: WAITING</div>
-                <button class="btn-test" id="btn-rule" onclick="testRuleBased()">Simulate Login Click</button>
+                <button class="btn-test" id="btn-rule">Simulate Login Click</button>
                 <div class="logs" id="log-rule"></div>
             </div>
 
@@ -73,109 +73,12 @@
                 <h2 style="color: #28a745;">⭐ 3. Adaptive EMA (Ours)</h2>
                 <p class="desc">Learns your clicking speed. Punishes sudden spikes but forgives natural fast typists.</p>
                 <div class="status-box" id="status-ema">STATUS: WAITING</div>
-                <button class="btn-test" id="btn-ema" onclick="testEMA()">Simulate Login Click</button>
+                <button class="btn-test" id="btn-ema">Simulate Login Click</button>
                 <div class="logs" id="log-ema"></div>
             </div>
         </div>
     </div>
 
-    <script>
-        // --- HELPER FUNCTION FOR LOGS ---
-        function addLog(elementId, message) {
-            const logDiv = document.getElementById(elementId);
-            logDiv.innerHTML = `<span>[${new Date().toLocaleTimeString()}] ${message}</span>` + logDiv.innerHTML;
-        }
-
-        function setStatus(id, text, state) {
-            const box = document.getElementById(id);
-            box.innerText = text;
-            box.className = `status-box ${state}`;
-        }
-
-        // ==========================================
-        // ALGO 1: TRADITIONAL SECURITY
-        // ==========================================
-        let tradAttempts = 0;
-        function testTraditional() {
-            tradAttempts++;
-            const btn = document.getElementById('btn-trad');
-            
-            if (tradAttempts >= 3) {
-                setStatus('status-trad', 'BLOCKED: Exceeded 3 Attempts', 'blocked');
-                btn.disabled = true;
-                addLog('log-trad', 'Account permanently locked.');
-            } else {
-                setStatus('status-trad', `FAILED: Attempt ${tradAttempts}/3`, 'warning');
-                addLog('log-trad', 'Invalid login attempt.');
-            }
-        }
-
-        // ==========================================
-        // ALGO 2: RULE-BASED SECURITY (Static)
-        // ==========================================
-        let ruleClicks = [];
-        function testRuleBased() {
-            const now = Date.now();
-            ruleClicks.push(now);
-            const btn = document.getElementById('btn-rule');
-
-            // Remove clicks older than 1 second
-            ruleClicks = ruleClicks.filter(t => now - t < 1000);
-
-            if (ruleClicks.length > 2) {
-                setStatus('status-rule', 'BLOCKED: Speed Limit Exceeded', 'blocked');
-                btn.disabled = true;
-                addLog('log-rule', `Detected ${ruleClicks.length} clicks/sec. Static rule broken.`);
-            } else {
-                setStatus('status-rule', 'ALLOW: Speed Normal', 'allowed');
-                addLog('log-rule', 'Login processed.');
-            }
-        }
-
-        // ==========================================
-        // ALGO 3: ADAPTIVE EMA (Your Thesis)
-        // ==========================================
-        let emaClicks = [];
-        let baselineSpeed = 0; // Starts at 0
-        let emaScore = 0;
-
-        function testEMA() {
-            const now = Date.now();
-            emaClicks.push(now);
-            const btn = document.getElementById('btn-ema');
-
-            // 1. Sliding Window (Last 1.5 seconds for demo purposes)
-            emaClicks = emaClicks.filter(t => now - t < 1500);
-            let currentSpeed = emaClicks.length;
-
-            // 2. Adaptive Learning (EMA Formula)
-            baselineSpeed = (currentSpeed * 0.2) + (baselineSpeed * 0.8);
-
-            // 3. Heuristic Scoring (Penalty if current speed is suddenly way higher than baseline)
-            let speedDiff = currentSpeed - baselineSpeed;
-            if (speedDiff > 2) {
-                emaScore += (speedDiff * 20); // Add massive penalty for sudden spike
-            } else {
-                emaScore -= 5; // Forgive if clicking normally
-            }
-
-            // Cap score
-            if (emaScore < 0) emaScore = 0;
-            if (emaScore > 100) emaScore = 100;
-
-            // 4. Decision Engine
-            if (emaScore >= 80) {
-                setStatus('status-ema', `BLOCK (Score: ${Math.round(emaScore)})`, 'blocked');
-                btn.disabled = true;
-                addLog('log-ema', `CRITICAL: Sudden spike. Anomaly Score reached ${Math.round(emaScore)}.`);
-            } else if (emaScore >= 40) {
-                setStatus('status-ema', `THROTTLE (Score: ${Math.round(emaScore)})`, 'warning');
-                addLog('log-ema', `WARNING: Suspicious speed detected.`);
-            } else {
-                setStatus('status-ema', `ALLOW (Score: ${Math.round(emaScore)})`, 'allowed');
-                addLog('log-ema', `Learned baseline: ${baselineSpeed.toFixed(1)}. Speed is natural.`);
-            }
-        }
-    </script>
+    <script src="compare.js"></script>
 </body>
 </html>

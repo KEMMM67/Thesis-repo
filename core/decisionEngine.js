@@ -1,19 +1,29 @@
 import { securityConfig } from "../config/securityConfig.js";
 
-// Evaluates the anomaly score against system thresholds to determine the security action
+/**
+ * Maps an anomaly score to a mitigation verdict by comparing it against the
+ * system's configured thresholds (config/securityConfig.js).
+ *
+ * Administrators receive a +15 tolerance on the throttle and block
+ * thresholds relative to other roles, since legitimate bulk operations
+ * (e.g. batch grade entry) naturally produce a higher request velocity
+ * than a single-record student action.
+ *
+ * @param {number} score - Anomaly score computed by core/scorer.js, 0-100.
+ * @param {string} role - Requesting user's role (e.g. "admin", "student").
+ * @returns {"BLOCK"|"THROTTLE"|"LOG"|"ALLOW"} Mitigation verdict for
+ *          core/mitigation.js to enforce.
+ */
 export function decideAction(score, role) {
-    let blockThreshold = securityConfig.thresholds.block;       // Default: 85
-    let throttleThreshold = securityConfig.thresholds.critical; // Default: 60
-    let logThreshold = securityConfig.thresholds.suspicious;    // Default: 15
+    let blockThreshold = securityConfig.thresholds.block;
+    let throttleThreshold = securityConfig.thresholds.critical;
+    let logThreshold = securityConfig.thresholds.suspicious;
 
-    // Role-Based Behavior Profiling: 
-    // Grants higher tolerance thresholds for Administrators to accommodate bulk operations
     if (role === 'admin') {
-        blockThreshold += 15;    
-        throttleThreshold += 15; 
+        blockThreshold += 15;
+        throttleThreshold += 15;
     }
 
-    // Evaluate the score and return the corresponding mitigation decision
     if (score >= blockThreshold) {
         return 'BLOCK';
     } else if (score >= throttleThreshold) {

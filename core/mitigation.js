@@ -1,28 +1,33 @@
 import { securityConfig } from "../config/securityConfig.js";
 import prisma from "../config/prisma.js";
 
-// Applies penalties based on the Decision Engine's verdict. Persisted via
-// prisma.ipTracking instead of an in-memory Map: blocks now survive a
-// server restart, are queryable by the admin dashboard's Blocked
-// Devices panel, and stay correct if this ever runs behind more than
-// one server instance (an in-memory Map is per-process and silently
-// diverges the moment there's a second one).
-//
-// SE NOTE on the "identifier" naming: this is called with `deviceId`
-// (public/admin_dashboard.js's x-device-id header, falling back to
-// req.ip - see core/monitor.js), not necessarily a real IP address, yet
-// it's stored in a column literally named ipAddress. That mismatch is
-// pre-existing to this feature - the in-memory blockedList Map this
-// replaces was already keyed the same way - not something introduced
-// here. Documented rather than silently carried forward.
+/**
+ * Enforces the Decision Engine's verdict (core/decisionEngine.js) against a
+ * request's originating identifier.
+ *
+ * State is persisted via `prisma.ipTracking` rather than an in-memory map so
+ * that blocks survive a server restart, remain queryable by the admin
+ * dashboard's Blocked Devices panel, and stay consistent if the server is
+ * ever scaled to more than one process.
+ *
+ * Note: `identifier` is populated from the `x-device-id` header (falling
+ * back to `req.ip` - see core/monitor.js) and is not necessarily a true IP
+ * address, though it is persisted in a column named `ipAddress`. This
+ * mismatch predates this function and is documented here rather than
+ * silently carried forward.
+ *
+ * @param {"BLOCK"|"THROTTLE"|"LOG"|"ALLOW"} decision - Verdict from decideAction().
+ * @param {import("express").Response} res - Response used to short-circuit blocked/throttled requests.
+ * @param {string} identifier - Device/IP identifier the verdict applies to.
+ * @returns {Promise<boolean>} `true` if the request was terminated (blocked
+ *          or throttled) and the caller must not proceed; `false` otherwise.
+ */
 export async function applyMitigation(decision, res, identifier) {
     const now = new Date();
 
-    // Step 1: verify if this identifier is already serving a lockout
-    // penalty from an EARLIER request, regardless of what the CURRENT
-    // request's own decision is - an already-blocked device must stay
-    // rejected even on a request that would otherwise score as
-    // ALLOW/LOG.
+    // An existing, still-active lockout takes precedence over the current
+    // request's own verdict - an already-blocked device stays rejected even
+    // on a request that would otherwise score as ALLOW/LOG.
     const existing = await prisma.ipTracking.findUnique({ where: { ipAddress: identifier } });
 
     if (existing?.isBlocked && existing.blockedUntil && existing.blockedUntil > now) {
@@ -33,7 +38,6 @@ export async function applyMitigation(decision, res, identifier) {
         return true;
     }
 
-    // Step 2: enforce new penalties based on the current decision.
     if (decision === 'BLOCK') {
         const blockedUntil = new Date(now.getTime() + securityConfig.mitigation.temporaryBlockMs);
         await prisma.ipTracking.upsert({
@@ -59,10 +63,8 @@ export async function applyMitigation(decision, res, identifier) {
         return true;
 
     } else if (decision === 'THROTTLE') {
-        // Issue a rate-limit warning and require a cooldown period.
-        // Not persisted to ipTracking - THROTTLE is a soft, momentary
-        // penalty (see core/mitigation.js's caller), not a standing
-        // block worth tracking in the same table BLOCK writes to.
+        // Not persisted: THROTTLE is a soft, momentary penalty, not a
+        // standing block worth recording in ipTracking.
         res.status(429).json({
             success: false,
             message: "Too many attempts. Please wait.",
@@ -71,16 +73,13 @@ export async function applyMitigation(decision, res, identifier) {
         return true;
     }
 
-    // ALLOW or LOG actions require no immediate mitigation and no
-    // ipTracking write - a row only gets created/updated here the
-    // moment a device actually earns a BLOCK, keeping this table a
-    // record of genuine incidents rather than every request ever seen
-    // (that volume already lives in AnomalyScore/BehaviorLog).
+    // ALLOW/LOG require no mitigation. A row is written here only once a
+    // device earns a BLOCK, so ipTracking stays a record of genuine
+    // incidents rather than every request seen.
     if (existing && (!existing.isBlocked || (existing.blockedUntil && existing.blockedUntil <= now))) {
-        // A previously-blocked device whose lockout has since expired -
-        // clear the stale flag so it stops showing up as "blocked" in
-        // the dashboard panel. Best-effort: failing this write doesn't
-        // affect the current request either way.
+        // Lockout has expired - clear the stale flag so the dashboard stops
+        // reporting the device as blocked. Best-effort; failure here does
+        // not affect the current request.
         await prisma.ipTracking.update({
             where: { ipAddress: identifier },
             data: { isBlocked: false, blockedUntil: null }

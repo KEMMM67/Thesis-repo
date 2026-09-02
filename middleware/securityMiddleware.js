@@ -5,6 +5,22 @@ import { decideAction } from "../core/decisionEngine.js";
 import { applyMitigation } from "../core/mitigation.js";
 import prisma from "../config/prisma.js";
 
+/**
+ * Request pipeline stage that scores every request for anomalous behavior
+ * and enforces the resulting mitigation verdict.
+ *
+ * Orchestrates the anomaly-detection subsystem end to end: derives the
+ * request's behavioral features (core/monitor.js), compares them against
+ * the device's learned baseline (core/profiler.js), computes an anomaly
+ * score (core/scorer.js), resolves a mitigation decision
+ * (core/decisionEngine.js), persists an auditable record of the
+ * evaluation, and enforces the decision (core/mitigation.js).
+ *
+ * @param {import("express").Request} req
+ * @param {import("express").Response} res
+ * @param {import("express").NextFunction} next
+ * @returns {Promise<void>} Calls `next()` unless the request was blocked or throttled.
+ */
 export const securityMiddleware = async (req, res, next) => {
     const user = req.user?.email || "unauthenticated";
     const role = req.user?.role || "guest";
@@ -29,11 +45,8 @@ export const securityMiddleware = async (req, res, next) => {
     const currentFeatures = getFeatures(deviceId, endpoint);
     const baseline = getBaseline(deviceId);
 
-    // computeScore() returns both the final score AND the itemized
-    // factors that produced it (see core/scorer.js) - SE traceability
-    // requirement: every decision this middleware makes has to be
-    // reconstructable after the fact, not just visible in a console
-    // that's no longer scrolled back to.
+    // The itemized factor breakdown is persisted alongside the score so
+    // every decision remains independently auditable (see core/scorer.js).
     const { score, breakdown } = computeScore(currentFeatures, baseline);
     const decision = decideAction(score, role);
 
@@ -41,12 +54,10 @@ export const securityMiddleware = async (req, res, next) => {
 
     let risk = decision === 'BLOCK' ? 'CRITICAL' : decision === 'THROTTLE' ? 'HIGH' : decision === 'LOG' ? 'MEDIUM' : 'LOW';
 
-    // The " | " delimiter is deliberate, not decorative: it separates a
-    // human-readable narrative (left of it) from the machine-precise
-    // formula (right of it) using one fixed, predictable character
-    // sequence, so public/admin_dashboard.js can split this single text
-    // column back into two cleanly-styled pieces without any fragile
-    // regex - see fetchLogs() there.
+    // The " | " delimiter separates the human-readable narrative from the
+    // machine-precise formula using one fixed sequence, so
+    // public/admin_dashboard.js can split this column back into two
+    // cleanly-styled pieces without a fragile regex (see fetchLogs()).
     const reasonText = `Device ${deviceId} triggered ${decision} | ${breakdown.formula}`;
 
     const results = await Promise.allSettled([
@@ -78,8 +89,6 @@ export const securityMiddleware = async (req, res, next) => {
         }
     });
 
-    // applyMitigation() is now async - it reads/writes prisma.ipTracking
-    // instead of an in-memory Map (see core/mitigation.js).
     const blocked = await applyMitigation(decision, res, deviceId);
 
     updateFeatures(deviceId, endpoint);
