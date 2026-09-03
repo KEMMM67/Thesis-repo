@@ -279,3 +279,40 @@ export function computeScore(currentFeatures, baselineFeatures) {
 function round2(n) {
     return Math.round(n * 100) / 100;
 }
+
+/**
+ * Fixed maximal-severity score for a network-policy violation - an IP
+ * outside ALLOWED_ADMIN_IPS reaching an admin-only endpoint at all (see
+ * middleware/ipWhitelistMiddleware.js) - as opposed to computeScore()
+ * above, which *derives* a graduated score from behavioral features
+ * accumulated over one or more requests.
+ *
+ * There is nothing to accumulate here: unlike a single mistyped
+ * password, which is presumed innocent until a pattern of repetition
+ * says otherwise, a request against admin infrastructure from outside
+ * the whitelisted network is, by policy, already conclusive on the
+ * first attempt - the network origin itself is the violation, not a
+ * rate of requests. The score is therefore asserted at the scale's
+ * ceiling (100) rather than computed: the same value computeScore()
+ * only reaches after a sustained brute-force burst (see its 9th-attempt
+ * worked example above), here reached in one request so it maps
+ * unambiguously onto the *existing* CRITICAL/BLOCK band
+ * (config/securityConfig.js: block=85) instead of introducing a
+ * separate severity scale a reader would have to learn.
+ *
+ * Returns the same {score, breakdown} shape as computeScore() so
+ * callers can persist it through the identical audit-logging code path
+ * as every other WEVA verdict (AnomalyScore + SecurityAction +
+ * BehaviorLog, all keyed off `breakdown.formula`).
+ *
+ * @param {string} reason - Human-readable detail folded into the returned formula string for the audit trail (e.g. the offending IP and path).
+ * @returns {{score: number, breakdown: {formula: string}}}
+ */
+export function getIntrusionScore(reason) {
+    return {
+        score: 100,
+        breakdown: {
+            formula: `NETWORK POLICY VIOLATION (instant max score, no accumulation needed) - ${reason}`
+        }
+    };
+}

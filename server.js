@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { securityMiddleware } from "./middleware/securityMiddleware.js";
 import { authMiddleware, requireRole } from "./middleware/authMiddleware.js";
+import { ipWhitelistMiddleware } from "./middleware/ipWhitelistMiddleware.js";
 import authRoutes from "./routes/authRoutes.js";
 import prisma from "./config/prisma.js";
 
@@ -91,7 +92,7 @@ app.use("/api", authRoutes);
  * @description Returns the 50 most recent behavior log entries for the
  * Admin Monitoring Dashboard.
  */
-app.get("/api/admin/logs", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.get("/api/admin/logs", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     try {
         const logs = await prisma.behaviorLog.findMany({
             orderBy: { logTime: 'desc' },
@@ -125,7 +126,7 @@ app.get("/api/admin/logs", authMiddleware, requireRole('admin'), securityMiddlew
  * recent scores is not itself security-relevant; it only needs admin
  * authentication.
  */
-app.get("/api/admin/scores", authMiddleware, requireRole('admin'), async (req, res) => {
+app.get("/api/admin/scores", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), async (req, res) => {
     try {
         const recent = await prisma.anomalyScore.findMany({
             orderBy: { calculatedAt: 'desc' },
@@ -159,7 +160,7 @@ app.get("/api/admin/scores", authMiddleware, requireRole('admin'), async (req, r
  * /api/admin/scores above: a read-only view of the mitigation layer should
  * not itself feed the mitigation layer.
  */
-app.get("/api/admin/blocked-devices", authMiddleware, requireRole('admin'), async (req, res) => {
+app.get("/api/admin/blocked-devices", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), async (req, res) => {
     try {
         const devices = await prisma.ipTracking.findMany({
             where: { isBlocked: true, blockedUntil: { gt: new Date() } },
@@ -189,7 +190,7 @@ app.get("/api/admin/blocked-devices", authMiddleware, requireRole('admin'), asyn
  * best-effort correlation via existing audit data, not a hard foreign
  * key relationship.
  */
-app.post("/api/admin/blocked-devices/unblock", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.post("/api/admin/blocked-devices/unblock", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { identifier } = req.body || {};
     if (!identifier) {
         return res.status(400).json({ success: false, message: "identifier is required." });
@@ -242,7 +243,7 @@ app.post("/api/admin/blocked-devices/unblock", authMiddleware, requireRole('admi
  * live than the database itself, and a backup containing live, unexpired
  * bearer tokens would itself be a security liability.
  */
-app.get("/api/admin/backup", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.get("/api/admin/backup", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     try {
         const [users, loginAttempts, anomalyScores, securityActions, behaviorLogs, ipTracking] = await Promise.all([
             prisma.user.findMany({ select: { id: true, email: true, role: true, createdAt: true } }),
@@ -278,12 +279,16 @@ app.get("/api/admin/backup", authMiddleware, requireRole('admin'), securityMiddl
 // =====================================================================
 // Every mutating route below runs the same chain, in this order:
 //
-//   authMiddleware -> requireRole('admin') -> securityMiddleware -> handler
+//   ipWhitelistMiddleware -> authMiddleware -> requireRole('admin') -> securityMiddleware -> handler
 //
-// authMiddleware must run first, since it decodes the JWT and sets
-// req.user; securityMiddleware depends on req.user to attribute the
-// anomaly score, security action, and behavior log entries it writes to
-// the specific admin performing the action. List (GET) routes omit
+// ipWhitelistMiddleware runs first, ahead of even authMiddleware: it is a
+// network-layer check (middleware/ipWhitelistMiddleware.js, simulating a
+// campus-intranet-only admin portal), and a disallowed origin should be
+// rejected before spending any compute on JWT verification, let alone
+// behavioral scoring. authMiddleware runs next, since it decodes the JWT
+// and sets req.user; securityMiddleware depends on req.user to attribute
+// the anomaly score, security action, and behavior log entries it writes
+// to the specific admin performing the action. List (GET) routes omit
 // securityMiddleware, consistent with /api/admin/scores and
 // /api/admin/blocked-devices above: they are read-only loads fired on
 // every section-open, not sensitive mutations.
@@ -411,7 +416,7 @@ app.get("/api/students/me", authMiddleware, requireRole('student'), async (req, 
  * @access Admin
  * @description Lists all students for the Student Records table.
  */
-app.get("/api/students", authMiddleware, requireRole('admin'), async (req, res) => {
+app.get("/api/students", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), async (req, res) => {
     try {
         const students = await prisma.student.findMany({ orderBy: { studentId: 'asc' } });
         res.json({ success: true, students });
@@ -426,7 +431,7 @@ app.get("/api/students", authMiddleware, requireRole('admin'), async (req, res) 
  * @access Admin
  * @description Creates a new student record.
  */
-app.post("/api/students", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.post("/api/students", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { studentId, fullName, department, program, yearLevel, status } = req.body || {};
 
     if (!studentId || !fullName) {
@@ -455,7 +460,7 @@ app.post("/api/students", authMiddleware, requireRole('admin'), securityMiddlewa
  * public/admin_dashboard.js tracks rows; studentId itself is not
  * updatable, as it is the stable lookup key the UI keys rows by.
  */
-app.put("/api/students/:id", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.put("/api/students/:id", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
     const { fullName, department, program, yearLevel, status } = req.body || {};
 
@@ -479,7 +484,7 @@ app.put("/api/students/:id", authMiddleware, requireRole('admin'), securityMiddl
  * @access Admin
  * @description Removes a student record.
  */
-app.delete("/api/students/:id", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.delete("/api/students/:id", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
 
     try {
@@ -507,7 +512,7 @@ app.delete("/api/students/:id", authMiddleware, requireRole('admin'), securityMi
  * @access Admin
  * @description Lists all subjects for the Subject Catalog table.
  */
-app.get("/api/subjects", authMiddleware, requireRole('admin'), async (req, res) => {
+app.get("/api/subjects", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), async (req, res) => {
     try {
         const subjects = await prisma.subject.findMany({ orderBy: { subjectCode: 'asc' } });
         res.json({ success: true, subjects });
@@ -522,7 +527,7 @@ app.get("/api/subjects", authMiddleware, requireRole('admin'), async (req, res) 
  * @access Admin
  * @description Creates a new subject record.
  */
-app.post("/api/subjects", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.post("/api/subjects", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { subjectCode, subjectTitle, units, department } = req.body || {};
 
     if (!subjectCode || !subjectTitle) {
@@ -549,7 +554,7 @@ app.post("/api/subjects", authMiddleware, requireRole('admin'), securityMiddlewa
  * @description Updates an existing subject record. `:id` is the
  * subjectCode (e.g. "SE301").
  */
-app.put("/api/subjects/:id", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.put("/api/subjects/:id", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
     const { subjectTitle, units, department } = req.body || {};
 
@@ -573,7 +578,7 @@ app.put("/api/subjects/:id", authMiddleware, requireRole('admin'), securityMiddl
  * @access Admin
  * @description Removes a subject record.
  */
-app.delete("/api/subjects/:id", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.delete("/api/subjects/:id", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
 
     try {
@@ -600,7 +605,7 @@ app.delete("/api/subjects/:id", authMiddleware, requireRole('admin'), securityMi
  * @access Admin
  * @description Lists all grade records with their related student and subject.
  */
-app.get("/api/grades", authMiddleware, requireRole('admin'), async (req, res) => {
+app.get("/api/grades", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), async (req, res) => {
     try {
         const grades = await prisma.grade.findMany({
             include: { student: true, subject: true },
@@ -618,7 +623,7 @@ app.get("/api/grades", authMiddleware, requireRole('admin'), async (req, res) =>
  * @access Admin
  * @description Records a new grade for a student in a subject.
  */
-app.post("/api/grades", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.post("/api/grades", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { studentId, subjectCode, term, grade, remarks } = req.body || {};
     if (!studentId || !subjectCode) {
         return res.status(400).json({ success: false, message: "studentId and subjectCode are required." });
@@ -648,7 +653,7 @@ app.post("/api/grades", authMiddleware, requireRole('admin'), securityMiddleware
  * @access Admin
  * @description Updates an existing grade record.
  */
-app.put("/api/grades/:id", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.put("/api/grades/:id", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
     const { grade, remarks } = req.body || {};
 
@@ -672,7 +677,7 @@ app.put("/api/grades/:id", authMiddleware, requireRole('admin'), securityMiddlew
  * @access Admin
  * @description Removes a grade record.
  */
-app.delete("/api/grades/:id", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.delete("/api/grades/:id", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
 
     try {
@@ -694,7 +699,7 @@ app.delete("/api/grades/:id", authMiddleware, requireRole('admin'), securityMidd
  * maximum 4x sensitivity tier in core/scorer.js, since minting a new
  * admin is a standing capability grant rather than a single data change.
  */
-app.post("/api/admin/accounts", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.post("/api/admin/accounts", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { email, password } = req.body || {};
 
     if (!email || !password) {
@@ -733,7 +738,7 @@ app.post("/api/admin/accounts", authMiddleware, requireRole('admin'), securityMi
  * validate that the auth + security pipeline gates the action correctly
  * at its configured 4x sensitivity weight (core/scorer.js).
  */
-app.post("/api/settings/backup", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.post("/api/settings/backup", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     // TODO: shell out to `pg_dump` (or a managed backup provider).
     res.json({
         success: true,
@@ -751,7 +756,7 @@ app.post("/api/settings/backup", authMiddleware, requireRole('admin'), securityM
  * additional confirmation, since a bad restore can silently overwrite
  * live data.
  */
-app.post("/api/settings/restore", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.post("/api/settings/restore", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     // TODO: implement restore (e.g. `pg_restore` against a selected snapshot).
     res.json({
         success: true,
@@ -768,7 +773,7 @@ app.post("/api/settings/restore", authMiddleware, requireRole('admin'), security
  * hitting a real destructive endpoint. Backs the dashboard's
  * "Simulate Attack" control.
  */
-app.post("/api/demo/ping", authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+app.post("/api/demo/ping", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     res.json({ success: true, message: "Ping scored by the WEVA pipeline." });
 });
 
