@@ -51,6 +51,20 @@ model User {
   role         Role
   createdAt    DateTime @default(now()) @map("created_at")
 
+  // Two-factor (OTP) verification state. Both are nullable because they
+  // are only ever populated between "password verified" and "OTP
+  // verified or expired" - for the vast majority of the row's lifetime
+  // (and for every non-admin account, which never enters the OTP step -
+  // see controllers/authController.js) both stay null. otpCode is sized
+  // for a zero-padded 6-digit numeric code (e.g. "004821"); it is stored
+  // as plaintext rather than hashed because it is single-use, expires in
+  // minutes (see OTP_TTL_MS in authController.js), and is always
+  // immediately cleared on verification (success or expiry) - the
+  // window in which a database compromise could reuse it is the same
+  // short window in which it would have worked anyway.
+  otpCode      String?   @map("otp_code") @db.VarChar(6)
+  otpExpiresAt DateTime? @map("otp_expires_at")
+
   loginAttempts   LoginAttempt[]
   anomalyScores   AnomalyScore[]
   securityActions SecurityAction[]

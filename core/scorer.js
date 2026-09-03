@@ -101,6 +101,16 @@ const endpointWeights = {
 
     // ---- Elevated endpoints (2x) ----
     "/api/login": 2,          // classic brute-force / credential-stuffing target
+    "/api/verify-otp": 2,     // second factor for admin login (see authController.js);
+                               // weighted level with /api/login rather than higher despite
+                               // its much smaller 6-digit keyspace - core/monitor.js already
+                               // folds OTP guesses into the same loginAttempts counter as
+                               // password guesses, so a higher weight here would compound
+                               // with that shared counter and throttle a legitimate user off
+                               // a single mistyped-then-corrected code; matching /api/login's
+                               // weight instead reuses its already-tuned 5th/9th-attempt
+                               // throttle/block cadence (see the worked examples in
+                               // computeScore() below) without new tuning.
     "/api/admin/logs": 2,     // exposes the security audit trail itself
     "/api/students": 2,       // POST creates a new student record
     "/api/subjects": 2,       // POST creates a new subject record

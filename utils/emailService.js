@@ -12,11 +12,23 @@ import nodemailer from "nodemailer";
  * login surfaces exactly that case to the one person positioned to
  * recognize "that wasn't me" and act on it.
  *
- * Every export in this module is written to never throw or reject: a
+ * Every export in this module is written to never *throw* - a
  * misconfigured mail account, an offline SMTP server, or a network
- * timeout must never fail the login request that triggered the alert, or
- * a legitimate user could be locked out of their own account by an
- * unrelated mail-delivery problem.
+ * timeout is always caught internally and logged rather than propagated.
+ *
+ * sendLoginAlert() and sendOtpEmail() differ, though, in what they do
+ * with that caught failure, because they sit in different places in the
+ * login flow. sendLoginAlert() is a supplementary notification sent
+ * *after* login has already succeeded, so it stays fire-and-forget and
+ * always resolves - a legitimate user must never be locked out of an
+ * account they already got into just because an unrelated mail-delivery
+ * problem occurred. sendOtpEmail() is different: for an admin account it
+ * is the *only* channel carrying the one code that can complete the
+ * login (see controllers/authController.js), so silently swallowing a
+ * delivery failure there would tell the admin "OTP sent to email" when
+ * no code is coming, leaving them stuck with no way to proceed. It is
+ * therefore awaited by its caller and resolves to a boolean so the
+ * caller can tell the client the truth instead.
  */
 
 /**
@@ -120,5 +132,85 @@ export async function sendLoginAlert(userEmail, ipAddress) {
         console.log(`[emailService] Login alert sent to ${userEmail}.`);
     } catch (err) {
         console.error(`[emailService] Failed to send login alert to ${userEmail}:`, err.message);
+    }
+}
+
+/**
+ * Builds the HTML body of a one-time verification code email. Mirrors
+ * buildLoginAlertHtml()'s layout (same inline-styled table, same brand
+ * header) so the two emails read as one consistent product, but leads
+ * with the code itself, large and letter-spaced, since that is the one
+ * piece of information the recipient actually needs to act on quickly.
+ *
+ * @param {string} otpCode - The 6-digit numeric code to display.
+ * @param {number} ttlMinutes - Minutes until the code expires, for display only.
+ * @returns {string} Self-contained HTML email body.
+ */
+function buildOtpEmailHtml(otpCode, ttlMinutes) {
+    return `
+    <div style="background-color:#f4f6f9;padding:32px 16px;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+        <table role="presentation" width="100%" style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:8px;overflow:hidden;border:1px solid #e2e5ea;">
+            <tr>
+                <td style="background-color:#8b0000;padding:20px 28px;">
+                    <span style="color:#ffffff;font-size:16px;font-weight:700;letter-spacing:0.5px;">STUDENT INFORMATION SYSTEM</span>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding:28px;">
+                    <h2 style="margin:0 0 12px;font-size:18px;color:#1a1a1a;">Administrator Verification Code</h2>
+                    <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#444;">
+                        Enter this code to finish signing in to the Admin Portal. It expires in
+                        ${ttlMinutes} minutes and can only be used once.
+                    </p>
+                    <div style="text-align:center;background:#f8f9fb;border:1px solid #e2e5ea;border-radius:6px;padding:18px;margin:0 0 20px;">
+                        <span style="font-size:32px;font-weight:700;letter-spacing:0.4em;color:#8b0000;font-family:'Courier New',monospace;">${otpCode}</span>
+                    </div>
+                    <p style="margin:0;font-size:13px;line-height:1.6;color:#666;">
+                        <strong>Didn't request this?</strong> Someone may have your password. Do not
+                        share this code with anyone, and contact your system administrator so the
+                        account and device can be reviewed.
+                    </p>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding:16px 28px;background:#f8f9fb;border-top:1px solid #e2e5ea;">
+                    <span style="font-size:11px;color:#999;">This is an automated security notification. Please do not reply to this email.</span>
+                </td>
+            </tr>
+        </table>
+    </div>`;
+}
+
+/**
+ * Sends a one-time verification code to an admin account completing the
+ * second step of login (see controllers/authController.js). Unlike
+ * sendLoginAlert() above, this is on the critical path of the login
+ * itself - see this file's @fileoverview for why it resolves to a
+ * boolean rather than being fire-and-forget.
+ *
+ * @param {string} userEmail - Email address of the account signing in; also the recipient.
+ * @param {string} otpCode - The 6-digit numeric code to deliver.
+ * @param {number} [ttlMinutes=5] - Minutes until the code expires, for display only; must match the caller's actual expiry.
+ * @returns {Promise<boolean>} `true` if the email was handed off to the SMTP server successfully, `false` otherwise. Never rejects.
+ */
+export async function sendOtpEmail(userEmail, otpCode, ttlMinutes = 5) {
+    if (!process.env.SMTP_EMAIL || !process.env.SMTP_APP_PASSWORD) {
+        console.warn("[emailService] SMTP_EMAIL/SMTP_APP_PASSWORD not configured - cannot send OTP.");
+        return false;
+    }
+
+    try {
+        await transporter.sendMail({
+            from: `"SIS Security" <${process.env.SMTP_EMAIL}>`,
+            to: userEmail,
+            subject: "Your SIS Admin Verification Code",
+            html: buildOtpEmailHtml(otpCode, ttlMinutes)
+        });
+
+        console.log(`[emailService] OTP sent to ${userEmail}.`);
+        return true;
+    } catch (err) {
+        console.error(`[emailService] Failed to send OTP to ${userEmail}:`, err.message);
+        return false;
     }
 }

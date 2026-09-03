@@ -20,7 +20,7 @@
             <h2 class="sys-title">STUDENT INFORMATION SYSTEM</h2>
             <h3 class="login-header">System Administrator Login</h3>
 
-            <form id="loginForm">
+            <form id="loginForm" class="auth-step">
                 <div class="input-group">
                     <label for="email">Admin Email Address</label>
                     <input type="email" id="email" placeholder="Enter your administrator email" required>
@@ -36,9 +36,27 @@
                 <div id="loginMessage" class="login-message" style="display: none;"></div>
             </form>
 
-            <p class="signup-text"><a href="/">&larr; Back to Student Login</a></p>
+            <!-- Hidden until POST /api/login responds with { requireOtp: true }
+                 (admin accounts only - see controllers/authController.js and
+                 admin_login.js). Never submitted directly by the user without
+                 that response occurring first. -->
+            <form id="otpForm" class="auth-step" style="display: none;">
+                <p class="otp-instructions">Enter the 6-digit code sent to <strong id="otpEmailDisplay"></strong>.</p>
 
-            <div class="test-accounts-section">
+                <div class="input-group">
+                    <label for="otp">Verification Code</label>
+                    <input type="text" id="otp" class="otp-input" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" required>
+                </div>
+
+                <button type="submit" class="login-btn">Verify</button>
+                <button type="button" id="backToLoginBtn" class="link-btn">&larr; Back to login</button>
+
+                <div id="otpMessage" class="login-message" style="display: none;"></div>
+            </form>
+
+            <p class="signup-text" id="backToStudentLink"><a href="/">&larr; Back to Student Login</a></p>
+
+            <div class="test-accounts-section" id="testAccountsNote">
                 <p class="test-title">Restricted Access</p>
                 <p>This portal is reserved for authorized system administrators.</p>
                 <p>Admin (test): admin@example.edu.ph / admin123</p>
@@ -46,6 +64,6 @@
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="admin_login.js"></script>
 </body>
 </html>

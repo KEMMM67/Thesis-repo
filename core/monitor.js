@@ -4,6 +4,25 @@ import { securityConfig } from "../config/securityConfig.js";
 const activeUsers = {};
 
 /**
+ * Endpoint path substrings that count toward `loginAttempts`. This
+ * originally matched only "login", back when a single POST /api/login
+ * was the entire credential-verification chain. Admin accounts now
+ * authenticate in two steps - password at /api/login, then a one-time
+ * code at /api/verify-otp (see controllers/authController.js) - and both
+ * steps must contribute to the same counter, or an attacker who already
+ * holds a valid password could brute-force the 6-digit OTP with
+ * complete impunity: guesses against /api/verify-otp would never raise
+ * loginAttempts, so getVelocityIncrement()'s MIN_VELOCITY_FLOOR and
+ * getFailRateFactor() in core/scorer.js would never engage for them,
+ * regardless of how many were sent. Treating both endpoints as one
+ * "unresolved authentication attempt" stream closes that gap and, since
+ * they share the same counter, extends WEVA's already-proven
+ * password-brute-force thresholds (see the worked examples in
+ * core/scorer.js#computeScore) to OTP-guessing for free.
+ */
+const AUTH_ATTEMPT_ENDPOINT_MARKERS = ['login', 'verify-otp'];
+
+/**
  * Derives a user's current behavioral features - request velocity and
  * outstanding login attempts - for input to core/scorer.js.
  *
@@ -63,15 +82,25 @@ export function updateFeatures(user, endpoint) {
 
     activeUsers[user].requests.push(now);
 
-    if (endpoint.includes('login')) {
+    if (AUTH_ATTEMPT_ENDPOINT_MARKERS.some(marker => endpoint.includes(marker))) {
         activeUsers[user].loginAttempts += 1;
     }
 }
 
 /**
- * Clears a user's tracked request history and login-attempt count,
- * typically invoked on successful authentication so past failures no
- * longer contribute to the anomaly score.
+ * Clears a user's tracked request history and login-attempt count.
+ *
+ * For a non-admin's single-step login this fires as soon as the password
+ * matches, same as before two-factor existed. For an admin's two-step
+ * login it must NOT fire until the OTP is verified (see
+ * controllers/authController.js's completeLogin()) - resetting it after
+ * the password step alone would let an attacker who already holds a
+ * valid password wipe this device's entire attempt history on demand
+ * simply by re-submitting POST /api/login, then take one fresh,
+ * unamplified guess at the OTP before resetting again. Only clearing the
+ * slate once the full chain succeeds means every OTP guess in between
+ * keeps compounding the same fail-rate factor a run of wrong passwords
+ * would.
  *
  * @param {string} user - User identifier to reset.
  * @returns {void}

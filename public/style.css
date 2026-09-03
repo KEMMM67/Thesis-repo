@@ -216,6 +216,52 @@ body {
     letter-spacing: 0.08em;
 }
 
+/* OTP (two-factor) step - public/admin_login.html + admin_login.js.
+   .auth-step drives the credentials-form <-> OTP-form transition: both
+   forms carry it, and toggling an element's `display` on/off restarts
+   its CSS animation, so simply flipping `style.display` in JS (no class
+   juggling needed) replays this fade/slide on whichever form just
+   became visible - the "smooth transition" the two forms need. */
+@keyframes authStepIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.auth-step { animation: authStepIn 0.25s var(--ease); }
+
+.otp-instructions {
+    text-align: center;
+    font-size: 13.5px;
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+    margin: 0 0 20px;
+}
+
+/* Composes with .input-group input above (padding/border/radius/etc.);
+   only adds the spacing that makes a 6-digit code easy to read at a
+   glance and mistype-proof. */
+.otp-input {
+    text-align: center;
+    letter-spacing: 0.5em;
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.link-btn {
+    display: block;
+    width: 100%;
+    margin-top: 14px;
+    padding: 4px;
+    background: none;
+    border: none;
+    color: var(--color-primary);
+    font-size: 13.5px;
+    font-weight: 600;
+    text-align: center;
+    cursor: pointer;
+}
+.link-btn:hover { text-decoration: underline; }
+.link-btn:focus-visible { outline: 3px solid var(--color-primary-ring); outline-offset: 2px; }
+
 /* INLINE MESSAGE BOX */
 .login-message {
     margin-top: 16px;

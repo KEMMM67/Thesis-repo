@@ -40,7 +40,24 @@ export const securityMiddleware = async (req, res, next) => {
     }
 
     const deviceId = req.headers["x-device-id"] || req.ip;
-    const endpoint = req.path;
+
+    // req.baseUrl + req.path, not req.path alone: Express rewrites req.url
+    // (and so req.path) relative to the current mount point while
+    // dispatching into a sub-router, restoring it afterward. Every
+    // endpoint in this app is registered directly on `app` (e.g.
+    // app.post("/api/students", ...) in server.js) EXCEPT /login and
+    // /verify-otp, which live in routes/authRoutes.js and are reached via
+    // app.use("/api", authRoutes) - so for exactly those two routes,
+    // req.path alone resolves to "/login"/"/verify-otp" (the /api prefix
+    // already stripped by that mount), which matches no entry in
+    // core/scorer.js#endpointWeights and silently falls back to
+    // DEFAULT_ENDPOINT_WEIGHT (1x) instead of their configured 2x -
+    // roughly doubling the number of attempts WEVA tolerates before
+    // THROTTLE/BLOCK on precisely the two credential-verification
+    // endpoints that need it most. req.baseUrl ("/api" inside that
+    // sub-router, "" for a route registered directly on `app`) added back
+    // reconstructs the full path either way.
+    const endpoint = req.baseUrl + req.path;
 
     const currentFeatures = getFeatures(deviceId, endpoint);
     const baseline = getBaseline(deviceId);
