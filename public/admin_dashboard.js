@@ -90,6 +90,90 @@ if (!localStorage.getItem('authToken')) {
         return "DEV-" + Math.abs(hash).toString(16);
     }
 
+    // =============================================================
+    // WEVA RATE-LIMIT BANNER
+    // =============================================================
+    // Persistent, dashboard-wide notice for a 403 (BLOCK) or 429
+    // (THROTTLE) verdict from WEVA - see authFetch() below, which triggers
+    // this for every affected admin action instead of interrupting with a
+    // native alert(). The countdown is always driven by the server's own
+    // retryAfterSeconds/retryAfter (core/mitigation.js#applyMitigation),
+    // never guessed client-side. Injected here rather than added to
+    // admin_dashboard.html so this feature stays self-contained in this
+    // file, matching this dashboard's existing precedent of building its
+    // own DOM (e.g. fetchBlockedDevices() building rows via
+    // document.createElement rather than relying on server-rendered markup).
+    //
+    // rateLimitBanner itself is declared with `let`, not `const`: if
+    // .topbar is ever missing, the catch block below falls back to a
+    // detached element so showRateLimitBanner() (called from authFetch(),
+    // far from this try block) always has a real node to write to instead
+    // of throwing again on every 403/429 for the rest of the session.
+    let rateLimitBanner;
+    try {
+        rateLimitBanner = document.createElement('div');
+        rateLimitBanner.id = 'rateLimitBanner';
+        rateLimitBanner.className = 'rate-limit-banner rate-limit-banner--danger';
+        rateLimitBanner.hidden = true;
+        rateLimitBanner.setAttribute('role', 'status');
+        rateLimitBanner.setAttribute('aria-live', 'polite');
+        const topbar = document.querySelector('.topbar');
+        if (!topbar) throw new Error('.topbar not found in the DOM.');
+        topbar.insertAdjacentElement('afterend', rateLimitBanner);
+        console.log('[admin_dashboard] Rate-limit banner injected successfully.');
+    } catch (err) {
+        console.error('[admin_dashboard] Rate-limit banner injection FAILED (falling back to a detached, invisible banner):', err);
+        rateLimitBanner = rateLimitBanner || document.createElement('div');
+    }
+
+    let rateLimitTimer = null;
+
+    /**
+     * Last countdown length (in seconds) shown by showRateLimitBanner(),
+     * kept so a caller that needs to apply its *own* matching lock (e.g.
+     * the Simulate Attack button below) can read the real, server-reported
+     * duration after the fact instead of hardcoding a guess of its own.
+     * @type {number|null}
+     */
+    let lastRateLimitSeconds = null;
+
+    /**
+     * Shows (or restarts) the dashboard-wide rate-limit banner with a live
+     * countdown, replacing the alert() this dashboard used to show for
+     * every WEVA 403/429 response.
+     *
+     * @param {'danger'|'warning'} severity - 'danger' for BLOCK, 'warning' for THROTTLE - matches the Security Logs table's own bg-danger/bg-warning badges (see fetchLogs()) so severity reads consistently across this whole dashboard.
+     * @param {string} message - Server-provided reason (e.g. "CRITICAL THREAT: ...").
+     * @param {number} seconds - Countdown length. Always the server's own retryAfterSeconds/retryAfter - never guessed client-side.
+     * @returns {void}
+     */
+    function showRateLimitBanner(severity, message, seconds) {
+        if (rateLimitTimer) clearInterval(rateLimitTimer);
+
+        lastRateLimitSeconds = Math.max(0, Math.round(seconds) || 0);
+        rateLimitBanner.className = `rate-limit-banner rate-limit-banner--${severity}`;
+        rateLimitBanner.hidden = false;
+
+        let timeLeft = lastRateLimitSeconds;
+        const icon = severity === 'danger' ? '🚨' : '⏳';
+
+        const render = () => {
+            rateLimitBanner.innerHTML = `${icon} ${escapeHtml(message)} &mdash; resumes in <span class="countdown">${timeLeft}s</span>`;
+        };
+        render();
+
+        rateLimitTimer = setInterval(() => {
+            timeLeft--;
+            if (timeLeft <= 0) {
+                clearInterval(rateLimitTimer);
+                rateLimitTimer = null;
+                rateLimitBanner.hidden = true;
+                return;
+            }
+            render();
+        }, 1000);
+    }
+
     /**
      * Clears the stored session and redirects to the Admin Portal login
      * page. Used on missing/expired sessions and manual logout.
@@ -116,6 +200,19 @@ if (!localStorage.getItem('authToken')) {
      * verdict (see the Simulate Attack demo), a 403 here often means
      * "this device is currently rate-limited," an expected outcome the
      * caller should display, not a session failure.
+     *
+     * A 403/429 also triggers the dashboard-wide rate-limit banner (see
+     * showRateLimitBanner() above) as a side effect, centrally, for every
+     * caller - fetchLogs(), submitAction()-based mutations, the Simulate
+     * Attack burst, all of it - rather than each call site having to
+     * remember to show it individually. The response body is read via
+     * .clone() (and awaited here, not fire-and-forget) so the banner's
+     * text/countdown is guaranteed current by the time this function
+     * returns, while the original, unconsumed Response still flows back to
+     * this call's own caller to read normally - a Response body can only
+     * be read once, so reading it here without cloning would break every
+     * caller downstream (submitAction(), fetchLogs(), etc. all still call
+     * response.json() themselves).
      *
      * @param {string} path - API path relative to API_BASE.
      * @param {RequestInit} [options] - Additional fetch options.
@@ -145,6 +242,19 @@ if (!localStorage.getItem('authToken')) {
             return new Promise(() => {});
         }
 
+        if (response.status === 403 || response.status === 429) {
+            try {
+                const data = await response.clone().json();
+                if (response.status === 403) {
+                    showRateLimitBanner('danger', data.message || 'Device temporarily blocked.', data.retryAfterSeconds || 60);
+                } else {
+                    showRateLimitBanner('warning', data.message || 'Too many attempts.', data.retryAfter || 15);
+                }
+            } catch (err) {
+                console.error('[admin_dashboard] Could not parse rate-limit response body:', err);
+            }
+        }
+
         return response;
     }
 
@@ -155,12 +265,17 @@ if (!localStorage.getItem('authToken')) {
      *
      * @param {string} path - API path relative to API_BASE.
      * @param {RequestInit} [options] - Additional fetch options.
-     * @returns {Promise<{success: boolean, message?: string}>}
+     * @returns {Promise<{success: boolean, message?: string, _httpStatus?: number}>}
      */
     async function submitAction(path, options) {
         try {
             const response = await authFetch(path, options);
-            return await response.json();
+            const data = await response.json();
+            // Additive only - every existing `data.success`/`data.message`
+            // check downstream is unaffected. showResult() below reads this
+            // to avoid alert()-ing a 403/429 that authFetch() already
+            // surfaced dashboard-wide via the rate-limit banner.
+            return { ...data, _httpStatus: response.status };
         } catch (error) {
             return { success: false, message: 'Cannot connect to the server. Please try again.' };
         }
@@ -169,11 +284,53 @@ if (!localStorage.getItem('authToken')) {
     /**
      * Displays a server response's `message` field to the admin.
      *
-     * @param {{message?: string}} data - Response body from submitAction().
+     * A 403/429 is deliberately skipped here: authFetch() already surfaced
+     * it dashboard-wide via the live-countdown rate-limit banner (see
+     * showRateLimitBanner()) by the time this runs, so alert()-ing the same
+     * event on top would be a redundant, blocking second notification for
+     * one thing that already happened.
+     *
+     * @param {{message?: string, _httpStatus?: number}} data - Response body from submitAction().
      * @returns {void}
      */
     function showResult(data) {
+        if (data && (data._httpStatus === 403 || data._httpStatus === 429)) return;
         alert((data && data.message) ? data.message : 'Something went wrong.');
+    }
+
+    /**
+     * Disables `button` and counts down `seconds` on its label, then
+     * restores `idleHtml`. Mirrors the same WEVA-driven countdown pattern
+     * used on the login pages (public/admin_login.js#startCountdown) -
+     * kept as a self-contained duplicate here rather than shared, matching
+     * this dashboard's existing precedent of duplicating small helpers
+     * (e.g. getDeviceFingerprint()) rather than importing from another
+     * page's script.
+     *
+     * @param {HTMLButtonElement} button
+     * @param {number} seconds - Countdown length, from the server's own retryAfterSeconds - never guessed client-side.
+     * @param {string} idleHtml - innerHTML to restore once the countdown ends.
+     * @returns {void}
+     */
+    function startButtonCountdown(button, seconds, idleHtml) {
+        button.disabled = true;
+        let timeLeft = Math.max(0, Math.round(seconds) || 0);
+
+        const render = () => {
+            button.innerHTML = `<i class="fa-solid fa-lock"></i> Locked (${timeLeft}s)`;
+        };
+        render();
+
+        const timer = setInterval(() => {
+            timeLeft--;
+            if (timeLeft <= 0) {
+                clearInterval(timer);
+                button.disabled = false;
+                button.innerHTML = idleHtml;
+                return;
+            }
+            render();
+        }, 1000);
     }
 
     /**
@@ -251,6 +408,10 @@ if (!localStorage.getItem('authToken')) {
             data.devices.forEach(device => {
                 const row = document.createElement('tr');
                 row.dataset.identifier = device.ipAddress;
+                // Read back by the click handler below to compute an
+                // accurate countdown if this row turns out to be the
+                // admin's own currently-blocked device.
+                row.dataset.blockedUntil = device.blockedUntil || '';
                 const blockedUntilText = device.blockedUntil ? new Date(device.blockedUntil).toLocaleString() : '—';
                 row.innerHTML = `
                     <td><strong>${escapeHtml(device.ipAddress)}</strong></td>
@@ -654,6 +815,11 @@ if (!localStorage.getItem('authToken')) {
             btnSimulateAttack.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Simulating...';
             demoStatus.textContent = 'Sending an escalating burst through the WEVA pipeline...';
 
+            // Set when the burst below trips BLOCK, so the finally block
+            // knows to leave the button's countdown (started below) alone
+            // instead of immediately re-enabling it.
+            let lockedByBlock = false;
+
             try {
                 // Stage 1: a small number of spaced-out pings, so the
                 // chart first shows one isolated LOG-level flag before
@@ -680,6 +846,16 @@ if (!localStorage.getItem('authToken')) {
 
                 if (statuses.includes(403)) {
                     demoStatus.innerHTML = '<strong style="color:#c62828;">BLOCKED.</strong> WEVA scored this device past the BLOCK threshold - other admin actions will be rejected for about 60 seconds while the temporary lockout is active. Watch the chart above.';
+                    // Locks and counts down this button itself for the same
+                    // duration the status line above already promises,
+                    // instead of silently re-enabling it right away - the
+                    // button's own state should match what it just told the
+                    // admin. lastRateLimitSeconds comes from authFetch()'s
+                    // own handling of whichever ping in this burst actually
+                    // got the 403 (see showRateLimitBanner()), so this is
+                    // the server's real remaining lockout, not a guess.
+                    lockedByBlock = true;
+                    startButtonCountdown(btnSimulateAttack, lastRateLimitSeconds || 60, '<i class="fa-solid fa-bolt"></i> Simulate Attack');
                 } else if (statuses.includes(429)) {
                     demoStatus.innerHTML = '<strong style="color:#b9660b;">THROTTLED.</strong> WEVA flagged elevated velocity. Check the chart above.';
                 } else {
@@ -689,8 +865,10 @@ if (!localStorage.getItem('authToken')) {
                 console.error('[admin_dashboard] Simulate Attack failed:', err);
                 demoStatus.textContent = 'Something went wrong sending the burst - see console.';
             } finally {
-                btnSimulateAttack.disabled = false;
-                btnSimulateAttack.innerHTML = '<i class="fa-solid fa-bolt"></i> Simulate Attack';
+                if (!lockedByBlock) {
+                    btnSimulateAttack.disabled = false;
+                    btnSimulateAttack.innerHTML = '<i class="fa-solid fa-bolt"></i> Simulate Attack';
+                }
             }
         });
 
@@ -759,6 +937,27 @@ if (!localStorage.getItem('authToken')) {
 
             const row = btn.closest('tr');
             const identifier = row.dataset.identifier;
+
+            // A device cannot lift its own active WEVA block from itself:
+            // this action runs through securityMiddleware like every other
+            // admin mutation (see server.js's POST
+            // /api/admin/blocked-devices/unblock), and
+            // applyMitigation()'s existing-lockout check
+            // (core/mitigation.js) rejects ANY request from an
+            // already-blocked identifier before the unblock handler ever
+            // runs - including this one. Catching that here, before even
+            // asking for confirmation, avoids a confusing failed click on
+            // an action that could never have succeeded, and shows the
+            // real remaining time (from the row's own blockedUntil) rather
+            // than a generic error.
+            const ownDeviceId = await getDeviceFingerprint();
+            if (identifier === ownDeviceId) {
+                const blockedUntil = row.dataset.blockedUntil ? new Date(row.dataset.blockedUntil) : null;
+                const secondsLeft = blockedUntil ? Math.max(1, Math.ceil((blockedUntil.getTime() - Date.now()) / 1000)) : 60;
+                showRateLimitBanner('warning', "You can't unblock your own device from itself while it's active - wait for the countdown, or unblock it from a different admin session/device", secondsLeft);
+                return;
+            }
+
             if (!confirm(`Force logout and unblock "${identifier}"?\n\nThis lifts the WEVA block immediately and ends the session of whichever user this device was most recently seen as, if any.`)) return;
 
             const data = await submitAction('/api/admin/blocked-devices/unblock', {

@@ -261,6 +261,27 @@ body {
 }
 .link-btn:hover { text-decoration: underline; }
 .link-btn:focus-visible { outline: 3px solid var(--color-primary-ring); outline-offset: 2px; }
+.link-btn:disabled { opacity: 0.6; cursor: not-allowed; text-decoration: none; }
+
+/* Inline loading spinner for the Login/OTP buttons while a request is in
+   flight (see public/script.js and public/admin_login.js's setLoading()) -
+   dependency-free CSS, since these two pages don't load Font Awesome
+   (unlike the dashboards, which already animate an fa-spinner icon for the
+   same idea - see e.g. #btnSimulateAttack in admin_dashboard.js). White
+   ring/top so it reads correctly against every state .login-btn can be in:
+   idle maroon, THROTTLE grey (#555), and BLOCK black. */
+@keyframes btnSpin { to { transform: rotate(360deg); } }
+.btn-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin-right: 7px;
+    vertical-align: -2px;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: btnSpin 0.6s linear infinite;
+}
 
 /* INLINE MESSAGE BOX */
 .login-message {
@@ -274,6 +295,18 @@ body {
 .msg-error { background-color: var(--color-danger-bg); color: var(--color-danger); border: 1px solid var(--color-danger-border); }
 .msg-success { background-color: var(--color-success-bg); color: var(--color-success); border: 1px solid var(--color-success-border); }
 .msg-warning { background-color: var(--color-warning-bg); color: var(--color-warning); border: 1px solid var(--color-warning-border); }
+
+/* Calmer secondary line under a BLOCK/THROTTLE message (see
+   showMessage()'s optional `subtext` param in script.js/admin_login.js) -
+   deliberately quieter than the alarming primary line above it, so a
+   legitimate user who just mistyped a password a few times reads "this is
+   automatic and temporary," not just the raw threat language. */
+.login-message-subtext {
+    margin-top: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    opacity: 0.85;
+}
 
 /* =========================================
    2. SIGNUP PAGE
@@ -459,6 +492,47 @@ small { font-size: 11px; color: var(--color-text-muted); display: block; margin-
     transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
 }
 .topbar a:hover { color: var(--color-primary); background-color: var(--color-primary-soft); }
+
+/* ---- WEVA rate-limit banner (Admin Dashboard) ----
+   Persistent, dashboard-wide notice injected by admin_dashboard.js
+   whenever authFetch() sees a 403 (BLOCK) or 429 (THROTTLE) from WEVA -
+   replaces the native alert() this dashboard used to show for that case.
+   Inserted as a sibling right after .topbar, so it participates in
+   .dashboard-body's normal flex-column flow (pushing .wrapper down
+   slightly while shown) rather than overlapping any content. Reuses the
+   same --color-danger/--color-warning tokens as the Security Logs table's
+   own bg-danger/bg-warning badges (see .badge below), so a BLOCK/THROTTLE
+   reads as the same severity everywhere in this dashboard, not a
+   different color language just for this banner. */
+.rate-limit-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 11px 20px;
+    font-size: 13.5px;
+    font-weight: 600;
+    text-align: center;
+    border-bottom: 1px solid transparent;
+    flex-shrink: 0;
+}
+/* Specificity (0,2,0) beats the UA stylesheet's bare [hidden] (0,1,0) AND
+   this file's own bare .rate-limit-banner (0,1,0) regardless of source
+   order, so toggling the `hidden` property in JS (this codebase's existing
+   convention - see #accountMenuPanel in admin_dashboard.js) reliably wins
+   over the `display: flex` above instead of silently being overridden by it. */
+.rate-limit-banner[hidden] { display: none; }
+.rate-limit-banner--danger {
+    background-color: var(--color-danger-bg);
+    color: var(--color-danger);
+    border-bottom-color: var(--color-danger-border);
+}
+.rate-limit-banner--warning {
+    background-color: var(--color-warning-bg);
+    color: var(--color-warning);
+    border-bottom-color: var(--color-warning-border);
+}
+.rate-limit-banner .countdown { font-variant-numeric: tabular-nums; font-weight: 700; }
 
 /* ---- Layout ---- */
 .wrapper { display: flex; flex: 1; overflow: hidden; }
