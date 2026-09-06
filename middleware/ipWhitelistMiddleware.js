@@ -1,4 +1,3 @@
-import prisma from "../config/prisma.js";
 import { securityConfig } from "../config/securityConfig.js";
 import { getIntrusionScore } from "../core/scorer.js";
 
@@ -11,6 +10,19 @@ import { getIntrusionScore } from "../core/scorer.js";
  * is coming from before anything else runs, so a disallowed network
  * origin is rejected before a single JWT verification, database lookup,
  * or behavioral score is attempted.
+ *
+ * This module never imports Prisma (or any other storage client) itself.
+ * Persisting a rejected attempt and resolving a submitted email's role are
+ * delegated entirely to the `auditSink`, `ipTrackingStore`, and
+ * `identityResolver` ports (see core/ports.js) injected into the two
+ * factories below; the default, Prisma-backed implementations are
+ * constructed once in server.js via core/weva.js's createWeva().
+ * `isEnabled()`/`getAllowedIps()` still
+ * read `process.env` directly further down - that is deliberate and
+ * unrelated to storage: they are the *policy* (is enforcement on, and
+ * from where), not a database dependency, and this file reading its own
+ * environment configuration is not the coupling this refactor is
+ * removing.
  *
  * Two things matter more here than in most middleware in this codebase,
  * because this gates the developer's own access, including during a live
@@ -34,14 +46,14 @@ import { getIntrusionScore } from "../core/scorer.js";
  *
  * Two exports, for two different situations:
  *
- *   - ipWhitelistMiddleware: unconditional enforcement, for any route
- *     that is admin-only *by construction* - every /api/admin/* route,
- *     the other admin-role-gated resource routes in server.js, and
+ *   - createIpWhitelistMiddleware: unconditional enforcement, for any
+ *     route that is admin-only *by construction* - every /api/admin/*
+ *     route, the other admin-role-gated resource routes in server.js, and
  *     POST /api/verify-otp (the OTP step exists only in the admin login
- *     chain - see controllers/authController.js). Mount it first, before
- *     authMiddleware, on all of those.
+ *     chain - see controllers/authController.js). Mount its returned
+ *     middleware first, before authMiddleware, on all of those.
  *
- *   - ipWhitelistForAdminLogin: role-aware enforcement, for POST
+ *   - createIpWhitelistForAdminLogin: role-aware enforcement, for POST
  *     /api/login specifically. That route is shared by both the student
  *     and admin portals and has no req.user yet to consult (login is
  *     pre-auth by definition), so it cannot use the unconditional
@@ -98,130 +110,134 @@ function rejectDisallowedIp(res) {
 }
 
 /**
- * Persists a blocked network-origin attempt through the same three audit
- * tables every other WEVA verdict uses (AnomalyScore, SecurityAction,
- * BehaviorLog - see middleware/securityMiddleware.js), scored via
- * core/scorer.js#getIntrusionScore(), and marks the offending IP blocked
- * in the same `ipTracking` store core/mitigation.js#applyMitigation
- * already checks first on every subsequent WEVA-scored request. That
- * means a disallowed IP that reaches a *different*, non-admin-gated
- * route after this rejection (e.g. the student portal) is still caught
- * there for the remainder of the block window, without securityMiddleware.js
- * needing any awareness that this middleware exists.
+ * Persists a blocked network-origin attempt via the injected `auditSink`
+ * and `ipTrackingStore` (see core/ports.js), scored via
+ * core/scorer.js#getIntrusionScore(). Marking the offending identifier
+ * blocked in `ipTrackingStore` means a disallowed IP that reaches a
+ * *different*, non-admin-gated route after this rejection (e.g. the
+ * student portal) is still caught there for the remainder of the block
+ * window, via core/mitigation.js#applyMitigation - without
+ * middleware/securityMiddleware.js needing any awareness that this
+ * middleware exists.
  *
  * Recorded against `userEmail: 'unauthenticated'`, matching how
- * securityMiddleware.js already attributes every pre-auth WEVA event -
- * an unauthorized network origin has, by definition, no authenticated
- * identity yet to attribute it to.
+ * middleware/securityMiddleware.js already attributes every pre-auth WEVA
+ * event - an unauthorized network origin has, by definition, no
+ * authenticated identity yet to attribute it to.
  *
+ * @param {import("../core/ports.js").AuditSink} auditSink
+ * @param {import("../core/ports.js").IpTrackingStore} ipTrackingStore
  * @param {string} ip - The normalized, disallowed IP that made the request.
  * @param {string} path - The full path it attempted to reach.
  * @returns {Promise<void>}
  */
-async function recordIntrusion(ip, path) {
+async function recordIntrusion(auditSink, ipTrackingStore, ip, path) {
     const { score, breakdown } = getIntrusionScore(`disallowed network origin ${ip} reached ${path}`);
-    const now = new Date();
-    const blockedUntil = new Date(now.getTime() + securityConfig.mitigation.temporaryBlockMs);
+    const blockedUntil = new Date(Date.now() + securityConfig.mitigation.temporaryBlockMs);
 
     // Deliberately includes the literal word "BLOCK": public/admin_dashboard.js's
     // fetchLogs() colors a log row's badge red when its description contains
-    // that substring (mirroring how securityMiddleware.js's own BLOCK verdicts
-    // already read "Device X triggered BLOCK | ..."), so this event renders
-    // with the same visual severity on the Security Logs table.
+    // that substring (mirroring how middleware/securityMiddleware.js's own
+    // BLOCK verdicts already read "Device X triggered BLOCK | ..."), so this
+    // event renders with the same visual severity on the Security Logs table.
     const description = `IP ${ip} triggered BLOCK (unauthorized network origin - admin portal is Campus-Intranet-restricted) | ${breakdown.formula}`;
 
     const results = await Promise.allSettled([
-        prisma.anomalyScore.create({
-            data: { userEmail: 'unauthenticated', userId: null, score, riskLevel: 'CRITICAL' }
+        auditSink.recordEvaluation({
+            userEmail: 'unauthenticated',
+            userId: null,
+            score,
+            riskLevel: 'CRITICAL',
+            actionTaken: 'BLOCK',
+            reason: description,
+            eventType: 'NETWORK_ACCESS_DENIED'
         }),
-        prisma.securityAction.create({
-            data: { userEmail: 'unauthenticated', userId: null, actionTaken: 'BLOCK', reason: description }
-        }),
-        prisma.behaviorLog.create({
-            data: { userEmail: 'unauthenticated', userId: null, eventType: 'NETWORK_ACCESS_DENIED', description }
-        }),
-        prisma.ipTracking.upsert({
-            where: { ipAddress: ip },
-            update: { isBlocked: true, blockedUntil, lastSeen: now, totalRequests: { increment: 1 } },
-            create: { ipAddress: ip, isBlocked: true, blockedUntil, lastSeen: now, totalRequests: 1 }
-        })
+        ipTrackingStore.block(ip, blockedUntil)
     ]);
 
-    const tableNames = ['anomaly_scores', 'security_actions', 'behavior_logs', 'ip_tracking'];
+    const labels = ['auditSink.recordEvaluation', 'ipTrackingStore.block'];
     results.forEach((result, i) => {
         if (result.status === 'rejected') {
-            console.error(`[ipWhitelistMiddleware] Audit write failed (${tableNames[i]}):`, result.reason.message);
+            console.error(`[ipWhitelistMiddleware] ${labels[i]} failed:`, result.reason.message);
         }
     });
 }
 
 /**
- * Unconditional network-origin gate for routes that are admin-only by
- * construction. See this file's @fileoverview for the full list and for
- * why it must be mounted before authMiddleware.
+ * Builds the unconditional network-origin gate for routes that are
+ * admin-only by construction. See this file's @fileoverview for the full
+ * list and for why its returned middleware must be mounted before
+ * authMiddleware.
  *
- * @param {import("express").Request} req
- * @param {import("express").Response} res
- * @param {import("express").NextFunction} next
- * @returns {Promise<void>}
+ * @param {object} deps
+ * @param {import("../core/ports.js").AuditSink} deps.auditSink
+ * @param {import("../core/ports.js").IpTrackingStore} deps.ipTrackingStore
+ * @returns {import("express").RequestHandler}
  */
-export async function ipWhitelistMiddleware(req, res, next) {
-    if (!isEnabled()) return next();
+export function createIpWhitelistMiddleware({ auditSink, ipTrackingStore }) {
+    return async function ipWhitelistMiddleware(req, res, next) {
+        if (!isEnabled()) return next();
 
-    const requestIp = normalizeIp(req.ip);
-    if (getAllowedIps().includes(requestIp)) return next();
+        const requestIp = normalizeIp(req.ip);
+        if (getAllowedIps().includes(requestIp)) return next();
 
-    // req.baseUrl + req.path, not req.path alone: this middleware is also
-    // mounted inside routes/authRoutes.js's sub-router (for
-    // POST /api/verify-otp), where req.path alone would already be
-    // stripped of the "/api" mount prefix - see the identical reasoning
-    // (and the bug it previously caused) in middleware/securityMiddleware.js.
-    await recordIntrusion(requestIp, req.baseUrl + req.path);
-    rejectDisallowedIp(res);
+        // req.baseUrl + req.path, not req.path alone: this middleware is also
+        // mounted inside routes/authRoutes.js's sub-router (for
+        // POST /api/verify-otp), where req.path alone would already be
+        // stripped of the "/api" mount prefix - see the identical reasoning
+        // (and the bug it previously caused) in middleware/securityMiddleware.js.
+        await recordIntrusion(auditSink, ipTrackingStore, requestIp, req.baseUrl + req.path);
+        rejectDisallowedIp(res);
+    };
 }
 
 /**
- * Role-aware network-origin gate for POST /api/login specifically.
+ * Builds the role-aware network-origin gate for POST /api/login
+ * specifically.
  *
  * Every other route this module gates is admin-only by construction, so
- * ipWhitelistMiddleware above can enforce unconditionally. Login is
- * different: it is the single shared endpoint for both the student and
- * admin portals (see controllers/authController.js), and - being pre-auth
- * by definition - has no req.user yet for this middleware to consult. So
- * this peeks at the *submitted* email's role before deciding whether to
- * enforce at all: a student's login is never subject to this check, at
- * any IP, satisfying "this must not block Student logins, only Admins."
- * An email that resolves to no account, or to a non-admin role, is
- * passed through unconditionally either way - the normal password check
- * in controllers/authController.js#login is what (correctly) rejects an
+ * createIpWhitelistMiddleware's returned middleware can enforce
+ * unconditionally. Login is different: it is the single shared endpoint
+ * for both the student and admin portals (see controllers/authController.js),
+ * and - being pre-auth by definition - has no req.user yet for this
+ * middleware to consult. So this peeks at the *submitted* email's role,
+ * via the injected `identityResolver`, before deciding whether to enforce
+ * at all: a student's login is never subject to this check, at any IP,
+ * satisfying "this must not block Student logins, only Admins." An email
+ * that resolves to no account, or to a non-admin role, is passed through
+ * unconditionally either way - the normal password check in
+ * controllers/authController.js#login is what (correctly) rejects an
  * invalid one, not this middleware; this middleware only ever *adds* a
  * rejection on top of that, for a confirmed admin email from a
  * disallowed network.
  *
- * @param {import("express").Request} req
- * @param {import("express").Response} res
- * @param {import("express").NextFunction} next
- * @returns {Promise<void>}
+ * @param {object} deps
+ * @param {import("../core/ports.js").AuditSink} deps.auditSink
+ * @param {import("../core/ports.js").IpTrackingStore} deps.ipTrackingStore
+ * @param {import("../core/ports.js").IdentityResolver} deps.identityResolver
+ * @returns {import("express").RequestHandler}
  */
-export async function ipWhitelistForAdminLogin(req, res, next) {
-    if (!isEnabled()) return next();
+export function createIpWhitelistForAdminLogin({ auditSink, ipTrackingStore, identityResolver }) {
+    return async function ipWhitelistForAdminLogin(req, res, next) {
+        if (!isEnabled()) return next();
 
-    const email = req.body?.email;
-    if (!email) return next();
+        const email = req.body?.email;
+        if (!email) return next();
 
-    let user;
-    try {
-        user = await prisma.user.findUnique({ where: { email }, select: { role: true } });
-    } catch (err) {
-        console.error("[ipWhitelistMiddleware] Role lookup failed, allowing through to the normal login flow:", err.message);
-        return next();
-    }
+        let identity;
+        try {
+            identity = await identityResolver.resolve(email);
+        } catch (err) {
+            console.error("[ipWhitelistMiddleware] Role lookup failed, allowing through to the normal login flow:", err.message);
+            return next();
+        }
 
-    if (user?.role !== 'admin') return next();
+        if (identity?.role !== 'admin') return next();
 
-    const requestIp = normalizeIp(req.ip);
-    if (getAllowedIps().includes(requestIp)) return next();
+        const requestIp = normalizeIp(req.ip);
+        if (getAllowedIps().includes(requestIp)) return next();
 
-    await recordIntrusion(requestIp, req.baseUrl + req.path);
-    rejectDisallowedIp(res);
+        await recordIntrusion(auditSink, ipTrackingStore, requestIp, req.baseUrl + req.path);
+        rejectDisallowedIp(res);
+    };
 }

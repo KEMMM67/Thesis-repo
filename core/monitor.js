@@ -1,7 +1,23 @@
 import { securityConfig } from "../config/securityConfig.js";
+import { MemoryStateStore } from "./stateStore.js";
 
-/** In-memory tracker of per-user request timestamps and login-attempt counts. */
-const activeUsers = {};
+/**
+ * Backing store for per-user/device request timestamps and login-attempt
+ * counts. Previously a bare module-level object (`activeUsers`) that grew
+ * by one permanent entry for every device/IP ever seen, for the lifetime
+ * of the process, with nothing to remove an entry once that device went
+ * away - a genuine unbounded-memory-growth bug, not just a style issue.
+ * MemoryStateStore (core/stateStore.js) fixes that by evicting an entry
+ * once it has sat idle for 30 minutes, while preserving the exact
+ * "get-or-create" access pattern this module already relied on. It is
+ * also the seam that lets this state later live in Redis instead
+ * (a RedisStateStore implementing the same get/set contract), so WEVA's
+ * behavioral tracking stays correct if this server is ever scaled to more
+ * than one process - see core/mitigation.js, which already made that
+ * exact argument for why ipTracking is persisted in the database rather
+ * than kept in memory.
+ */
+const store = new MemoryStateStore();
 
 /**
  * Endpoint path substrings that count toward `loginAttempts`. This
@@ -12,7 +28,7 @@ const activeUsers = {};
  * steps must contribute to the same counter, or an attacker who already
  * holds a valid password could brute-force the 6-digit OTP with
  * complete impunity: guesses against /api/verify-otp would never raise
- * loginAttempts, so getVelocityIncrement()'s MIN_VELOCITY_FLOOR and
+ * loginAttempts, so getVelocityIncrement()'s minimum velocity floor and
  * getFailRateFactor() in core/scorer.js would never engage for them,
  * regardless of how many were sent. Treating both endpoints as one
  * "unresolved authentication attempt" stream closes that gap and, since
@@ -36,15 +52,7 @@ const AUTH_ATTEMPT_ENDPOINT_MARKERS = ['login', 'verify-otp'];
  */
 export function getFeatures(user, endpoint) {
     const now = Date.now();
-
-    if (!activeUsers[user]) {
-        activeUsers[user] = {
-            requests: [],
-            loginAttempts: 0
-        };
-    }
-
-    const userData = activeUsers[user];
+    const userData = store.getOrCreate(user, () => ({ requests: [], loginAttempts: 0 }));
 
     // Drop timestamps outside the scoring window so velocity reflects
     // recent behavior only.
@@ -75,15 +83,12 @@ export function getFeatures(user, endpoint) {
  */
 export function updateFeatures(user, endpoint) {
     const now = Date.now();
+    const userData = store.getOrCreate(user, () => ({ requests: [], loginAttempts: 0 }));
 
-    if (!activeUsers[user]) {
-        activeUsers[user] = { requests: [], loginAttempts: 0 };
-    }
-
-    activeUsers[user].requests.push(now);
+    userData.requests.push(now);
 
     if (AUTH_ATTEMPT_ENDPOINT_MARKERS.some(marker => endpoint.includes(marker))) {
-        activeUsers[user].loginAttempts += 1;
+        userData.loginAttempts += 1;
     }
 }
 
@@ -102,12 +107,15 @@ export function updateFeatures(user, endpoint) {
  * keeps compounding the same fail-rate factor a run of wrong passwords
  * would.
  *
+ * Only resets an entry that already exists, matching this function's
+ * original behavior from before MemoryStateStore existed - a device with
+ * no tracked state yet has nothing to clear.
+ *
  * @param {string} user - User identifier to reset.
  * @returns {void}
  */
 export function resetFeatures(user) {
-    if (activeUsers[user]) {
-        activeUsers[user].loginAttempts = 0;
-        activeUsers[user].requests = [];
+    if (store.has(user)) {
+        store.set(user, { requests: [], loginAttempts: 0 });
     }
 }

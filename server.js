@@ -5,11 +5,10 @@ import cors from "cors";
 import bcrypt from "bcryptjs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { securityMiddleware } from "./middleware/securityMiddleware.js";
 import { authMiddleware, requireRole } from "./middleware/authMiddleware.js";
-import { ipWhitelistMiddleware } from "./middleware/ipWhitelistMiddleware.js";
-import authRoutes from "./routes/authRoutes.js";
 import prisma from "./config/prisma.js";
+import { PrismaAuditSink, PrismaIpTrackingStore, PrismaIdentityResolver } from "./adapters/prisma/index.js";
+import { createWeva } from "./core/weva.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -80,11 +79,35 @@ function formatLogTime(date) {
     return `${year}-${month}-${day} ${pad(hours)}:${minutes}:${seconds} ${ampm}`;
 }
 
+// ---------------------------------------------------------------------
+// WEVA WIRING
+// ---------------------------------------------------------------------
+// The only place in this app that touches WEVA's internals directly: it
+// constructs the Prisma-backed adapters (see core/ports.js for the
+// AuditSink/IpTrackingStore/IdentityResolver interfaces they implement,
+// adapters/prisma/ for these implementations) and hands them to
+// createWeva() (core/weva.js) - the framework's single public entry
+// point, returning every piece of middleware already wired. Nothing
+// below this block, and nothing inside core/mitigation.js,
+// middleware/securityMiddleware.js, or middleware/ipWhitelistMiddleware.js,
+// imports Prisma. A deployment on a different database swaps these three
+// constructor calls for a different adapter implementing the same
+// interface; nothing else in the security pipeline, or in this file,
+// changes.
+const weva = createWeva({
+    auditSink: new PrismaAuditSink(prisma),
+    ipTrackingStore: new PrismaIpTrackingStore(prisma),
+    identityResolver: new PrismaIdentityResolver(prisma)
+});
+
+const securityMiddleware = weva.securityMiddleware();
+const ipWhitelistMiddleware = weva.ipWhitelistMiddleware();
+
 // POST /api/login lives in controllers/authController.js + routes/authRoutes.js
 // (mounted below), not inline here - see those files for the WEVA-protected
 // authentication flow (bcrypt compare -> JWT -> session -> audit log ->
 // best-effort login-alert email).
-app.use("/api", authRoutes);
+app.use("/api", weva.authRoutes());
 
 /**
  * @route GET /api/admin/logs

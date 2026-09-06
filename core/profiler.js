@@ -1,7 +1,13 @@
 import { securityConfig } from "../config/securityConfig.js";
+import { MemoryStateStore } from "./stateStore.js";
 
-/** Stores each user's learned behavioral baseline. */
-const baselines = {};
+/**
+ * Backing store for each user's learned behavioral baseline. Previously a
+ * bare module-level object (`baselines`) with the same unbounded-growth
+ * problem as core/monitor.js's `activeUsers` - see core/stateStore.js and
+ * the equivalent comment on monitor.js's own store for the full rationale.
+ */
+const store = new MemoryStateStore();
 
 /**
  * Retrieves a user's baseline profile, initializing a default one on first
@@ -11,13 +17,10 @@ const baselines = {};
  * @returns {{requestRate: number, previousScore: number}}
  */
 export function getBaseline(user) {
-    if (!baselines[user]) {
-        baselines[user] = {
-            requestRate: 0,
-            previousScore: 0
-        };
-    }
-    return baselines[user];
+    return store.getOrCreate(user, () => ({
+        requestRate: 0,
+        previousScore: 0
+    }));
 }
 
 /**
