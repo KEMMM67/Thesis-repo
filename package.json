@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "start http://localhost:3000 & nodemon server.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "seed:bulk": "node prisma/seed-bulk.js"
   },
   "keywords": [
     "security",
@@ -27,6 +28,7 @@
     "nodemailer": "^9.1.1"
   },
   "devDependencies": {
+    "@faker-js/faker": "^10.6.0",
     "nodemon": "^3.1.14",
     "prisma": "^6.19.3",
     "vitest": "^5.0.0"

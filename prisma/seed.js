@@ -1,7 +1,10 @@
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+// Shared, encryption-extended singleton (config/prisma.js) - not a fresh
+// `new PrismaClient()` of its own. A second, unextended instance would
+// write Grade.grade as plaintext, silently bypassing
+// adapters/prisma/fieldEncryption.js entirely.
+import prisma from '../config/prisma.js';
 
-const prisma = new PrismaClient();
 const SALT_ROUNDS = 10;
 
 async function upsertTestUser(email, plainPassword, role) {

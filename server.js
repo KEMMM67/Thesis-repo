@@ -5,6 +5,8 @@ import cors from "cors";
 import bcrypt from "bcryptjs";
 import path from "path";
 import { fileURLToPath } from "url";
+import https from "https";
+import fs from "fs";
 import { authMiddleware, requireRole } from "./middleware/authMiddleware.js";
 import prisma from "./config/prisma.js";
 import { PrismaAuditSink, PrismaIpTrackingStore, PrismaIdentityResolver } from "./adapters/prisma/index.js";
@@ -12,6 +14,22 @@ import { createWeva } from "./core/weva.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Trusts exactly one hop of X-Forwarded-For (Render's own edge proxy, which
+// terminates TLS and forwards every request to this process over its
+// internal network - see the HTTPS setup notes below). Without this,
+// Express's req.ip resolves to that proxy's own address for every request
+// once deployed, not the real client - collapsing WEVA's per-device/IP
+// behavioral profiling (core/monitor.js), the campus-intranet IP whitelist
+// (middleware/ipWhitelistMiddleware.js), and controllers/authController.js's
+// login-attempt logging onto one identical "IP" for every user. Set to 1
+// (not `true`, which would trust the whole X-Forwarded-For chain -
+// spoofable by the client) because Render sits exactly one proxy hop in
+// front of this app; a different number of hops in a future deployment
+// topology would need this value updated to match. Harmless locally: a
+// direct, non-proxied connection never sends X-Forwarded-For, so req.ip
+// still resolves to the real local client either way.
+app.set('trust proxy', 1);
 
 if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET is not set. Add it to your .env file before starting the server.");
@@ -800,8 +818,46 @@ app.post("/api/demo/ping", ipWhitelistMiddleware, authMiddleware, requireRole('a
     res.json({ success: true, message: "Ping scored by the WEVA pipeline." });
 });
 
-app.listen(PORT, () => {
-  console.log("--------------------------------------------------");
-  console.log(`🟢 SYSTEM ONLINE: Server is actively listening on Port ${PORT}`);
-  console.log("--------------------------------------------------");
-});
+// ---------------------------------------------------------------------
+// HTTP vs HTTPS LISTENER
+// ---------------------------------------------------------------------
+// ENABLE_HTTPS mirrors the same fail-open-to-simple, read-fresh-from-env
+// pattern as ENABLE_IP_WHITELIST (middleware/ipWhitelistMiddleware.js):
+// unset, or anything other than "true", keeps today's plain-HTTP dev
+// workflow completely undisturbed - fs.readFileSync below never even runs
+// in that mode, so a missing cert can't break normal day-to-day
+// development. Only set it once certs/ holds a real mkcert-issued
+// key/cert pair (see the Local HTTPS/TLS setup notes) for the live
+// thesis-defense demo.
+const ENABLE_HTTPS = (process.env.ENABLE_HTTPS || '').trim().toLowerCase() === 'true';
+
+if (ENABLE_HTTPS) {
+    const keyPath = process.env.TLS_KEY_PATH || path.join(__dirname, 'certs', 'localhost-key.pem');
+    const certPath = process.env.TLS_CERT_PATH || path.join(__dirname, 'certs', 'localhost-cert.pem');
+
+    let httpsOptions;
+    try {
+        httpsOptions = {
+            key: fs.readFileSync(keyPath),
+            cert: fs.readFileSync(certPath)
+        };
+    } catch (err) {
+        throw new Error(
+            `ENABLE_HTTPS is true but the TLS key/cert could not be read (${err.message}). ` +
+            `Generate them with mkcert first - see the Local HTTPS/TLS setup notes - or set ` +
+            `TLS_KEY_PATH/TLS_CERT_PATH to point at an existing pair.`
+        );
+    }
+
+    https.createServer(httpsOptions, app).listen(PORT, () => {
+        console.log("--------------------------------------------------");
+        console.log(`🟢 SYSTEM ONLINE (HTTPS): Server is actively listening on https://localhost:${PORT}`);
+        console.log("--------------------------------------------------");
+    });
+} else {
+    app.listen(PORT, () => {
+        console.log("--------------------------------------------------");
+        console.log(`🟢 SYSTEM ONLINE: Server is actively listening on Port ${PORT}`);
+        console.log("--------------------------------------------------");
+    });
+}

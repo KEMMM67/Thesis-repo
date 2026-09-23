@@ -32,7 +32,12 @@ export async function authMiddleware(req, res, next) {
 
     let decoded;
     try {
-        decoded = jwt.verify(token, process.env.JWT_SECRET);
+        // Explicitly restrict to the one algorithm this app ever signs
+        // with (see controllers/authController.js), rather than trusting
+        // whatever `alg` the token's own header claims - a token forged
+        // with a different algorithm is rejected outright instead of
+        // being evaluated on the signer's terms.
+        decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     } catch (err) {
         return res.status(401).json({ success: false, message: "Invalid or expired token." });
     }

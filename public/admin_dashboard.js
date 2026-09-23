@@ -27,7 +27,8 @@ if (!localStorage.getItem('authToken')) {
     // =============================================================
     // CONFIG + SHARED HELPERS
     // =============================================================
-    const API_BASE = 'http://localhost:3000';
+    // Same origin that served this page: Express serves both the frontend and the API.
+    const API_BASE = window.location.origin;
 
     /**
      * Escapes text for safe insertion into innerHTML. Applied to all

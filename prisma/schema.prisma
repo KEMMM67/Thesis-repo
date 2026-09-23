@@ -205,7 +205,19 @@ model Grade {
   subjectId Int      @map("subject_id")
   subject   Subject  @relation(fields: [subjectId], references: [id])
   term      String?  @db.VarChar(50)
-  grade     Decimal? @db.Decimal(3, 2)
+
+  // AES-256-GCM ciphertext envelope ("ivB64:authTagB64:cipherB64"), written
+  // and read transparently by adapters/prisma/fieldEncryption.js's Prisma
+  // Client Extension - every caller (server.js, prisma/seed.js) still
+  // reads and writes `grade` as a plain numeric string, exactly as when
+  // this column held a raw Decimal. Widened to VarChar(255) because the
+  // envelope is longer than the 3-character grade it replaces -
+  // @db.Decimal(3, 2) could never have stored it. Nothing in this app
+  // filters, sorts, or aggregates on `grade` at the SQL level (GWA is
+  // computed in JS from fetched rows - see server.js's /api/students/me),
+  // so losing that ability by encrypting this column costs nothing here.
+  grade     String?  @db.VarChar(255)
+
   remarks   String?  @db.VarChar(50)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
