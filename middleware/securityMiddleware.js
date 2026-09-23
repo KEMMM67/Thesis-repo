@@ -1,8 +1,10 @@
-import { getFeatures, updateFeatures } from "../core/monitor.js";
+import { getFeatures, updateFeatures, isAuthAttemptEndpoint } from "../core/monitor.js";
 import { getBaseline, updateBaseline } from "../core/profiler.js";
 import { computeScore, defaultWevaConfig } from "../core/scorer.js";
 import { decideAction, defaultDecisionConfig } from "../core/decisionEngine.js";
 import { applyMitigation } from "../core/mitigation.js";
+import { countRecentAttempts, recordAttempt } from "../core/ipAttempts.js";
+import { getClientIdentity } from "./clientIdentity.js";
 
 /**
  * Builds the request pipeline stage that scores every request for
@@ -14,6 +16,18 @@ import { applyMitigation } from "../core/mitigation.js";
  * score (core/scorer.js), resolves a mitigation decision
  * (core/decisionEngine.js), persists an auditable record of the
  * evaluation, and enforces the decision (core/mitigation.js).
+ *
+ * Two identities, highest score wins. Every request is scored against its
+ * device (the x-device-id header, or its IP when it sends none - see
+ * middleware/clientIdentity.js). A login or OTP attempt made before
+ * authentication is additionally scored against its IP's recent attempts
+ * (core/ipAttempts.js), and the higher of the two scores decides. The
+ * device ID is client-controlled: a bot that sends a new one with every
+ * guess has no device history to escalate, but all of its guesses still
+ * land on one IP history. Authenticated requests are judged by device only -
+ * they already carry a server-verified identity (JWT + session), and scoring
+ * their IP as well would let one attacker behind a shared campus IP lock out
+ * every student and administrator already signed in from that network.
  *
  * The behavioral state getFeatures()/getBaseline() read and write here -
  * per-device request history, login-attempt counts, and EMA baselines -
@@ -57,8 +71,6 @@ export function createSecurityMiddleware({ auditSink, ipTrackingStore, identityR
             }
         }
 
-        const deviceId = req.headers["x-device-id"] || req.ip;
-
         // req.baseUrl + req.path, not req.path alone: Express rewrites req.url
         // (and so req.path) relative to the current mount point while
         // dispatching into a sub-router, restoring it afterward. Every
@@ -76,16 +88,44 @@ export function createSecurityMiddleware({ auditSink, ipTrackingStore, identityR
         // sub-router, "" for a route registered directly on `app`) added back
         // reconstructs the full path either way.
         const endpoint = req.baseUrl + req.path;
+        const { ip, deviceKey } = getClientIdentity(req);
+        const scoreIp = !req.user && isAuthAttemptEndpoint(endpoint);
 
-        const currentFeatures = getFeatures(deviceId, endpoint);
-        const baseline = getBaseline(deviceId);
+        // ---- One synchronous step: read history, score, record. ----
+        // Nothing between here and the end of this block may `await`. Node
+        // runs one callback at a time, so a request that reaches this block
+        // sees every request that reached it before - including ones still
+        // waiting on the database writes further down. This request used to
+        // be recorded only AFTER those two awaited writes, so simultaneous
+        // requests all read the same stale history: against the real server,
+        // the first 9 of 20 parallel login attempts from one device each saw
+        // zero prior attempts, scored 0 (ALLOW), and went on to bcrypt.
+        // Recorded here instead, the same burst scores 0, 30, then 100 (the
+        // 3rd request, 2 attempts inside ~1 ms = 2000 req/s, x 2 x 2 x 5,
+        // clamped) and is BLOCKed from its third request on.
+        const deviceFeatures = getFeatures(deviceKey, endpoint);
+        const device = computeScore(deviceFeatures, getBaseline(deviceKey), wevaConfig);
+        const ipResult = scoreIp
+            ? computeScore({ requestRate: 0, loginAttempts: countRecentAttempts(ip), endpoint }, { requestRate: 0 }, wevaConfig)
+            : null;
 
-        // The itemized factor breakdown is persisted alongside the score so
-        // every decision remains independently auditable (see core/scorer.js).
-        const { score, breakdown } = computeScore(currentFeatures, baseline, wevaConfig);
+        updateFeatures(deviceKey, endpoint);
+        updateBaseline(deviceKey, deviceFeatures);
+        if (scoreIp) recordAttempt(ip);
+        // ---- End of the synchronous step. ----
+
+        // Ties go to the device: blocking the narrower identity is enough
+        // when both tell the same story (one bot on its own IP), and it
+        // keeps everyone else behind that IP unaffected.
+        const ipDecides = ipResult !== null && ipResult.score > device.score;
+        const { score, breakdown } = ipDecides ? ipResult : device;
         const decision = decideAction(score, role, decisionConfig);
 
-        console.log(`[SECURITY] Device: ${deviceId} | Target User: ${user} | Score: ${score} (${breakdown.formula}) | Decision: ${decision}`);
+        if (ipResult) {
+            console.log(`[SECURITY] Device: ${deviceKey} (score ${device.score}) | IP: ${ip} (score ${ipResult.score}) | Target User: ${user} | Final: ${score} via ${ipDecides ? 'IP' : 'device'} (${breakdown.formula}) | Decision: ${decision}`);
+        } else {
+            console.log(`[SECURITY] Device: ${deviceKey} | Target User: ${user} | Score: ${score} (${breakdown.formula}) | Decision: ${decision}`);
+        }
 
         const risk = decision === 'BLOCK' ? 'CRITICAL' : decision === 'THROTTLE' ? 'HIGH' : decision === 'LOG' ? 'MEDIUM' : 'LOW';
 
@@ -93,7 +133,10 @@ export function createSecurityMiddleware({ auditSink, ipTrackingStore, identityR
         // machine-precise formula using one fixed sequence, so
         // public/admin_dashboard.js can split this column back into two
         // cleanly-styled pieces without a fragile regex (see fetchLogs()).
-        const reasonText = `Device ${deviceId} triggered ${decision} | ${breakdown.formula}`;
+        const narrative = ipDecides
+            ? `IP ${ip} triggered ${decision} (recent login attempts from any device; device ${deviceKey} alone scored ${device.score})`
+            : `Device ${deviceKey} triggered ${decision}`;
+        const reasonText = `${narrative} | ${breakdown.formula}`;
 
         await auditSink.recordEvaluation({
             userEmail: user,
@@ -105,10 +148,13 @@ export function createSecurityMiddleware({ auditSink, ipTrackingStore, identityR
             eventType: 'SECURITY_EVALUATION'
         });
 
-        const blocked = await applyMitigation(decision, res, deviceId, ipTrackingStore);
-
-        updateFeatures(deviceId, endpoint);
-        updateBaseline(deviceId, currentFeatures);
+        // Every identity scored above is checked for an existing block; the
+        // one that produced the verdict goes first, since a new BLOCK is
+        // recorded against it alone (see core/mitigation.js).
+        const identifiers = !scoreIp || ip === deviceKey
+            ? [deviceKey]
+            : ipDecides ? [ip, deviceKey] : [deviceKey, ip];
+        const blocked = await applyMitigation(decision, res, identifiers, ipTrackingStore);
 
         if (blocked) return;
 

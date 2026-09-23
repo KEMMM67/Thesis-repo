@@ -90,6 +90,35 @@ describe('applyMitigation (fake IpTrackingStore, zero database)', () => {
         expect(res2.body.retryAfterSeconds).toBeGreaterThan(0);
     });
 
+    it('refuses a request when ANY of its identities is actively blocked (e.g. its IP, under a fresh device ID)', async () => {
+        await applyMitigation('BLOCK', res, '203.0.113.5', store);
+        const res2 = createFakeResponse();
+
+        const terminated = await applyMitigation('ALLOW', res2, ['brand-new-device', '203.0.113.5'], store);
+
+        expect(terminated).toBe(true);
+        expect(res2.statusCode).toBe(403);
+    });
+
+    it('records a new BLOCK against the first (responsible) identity only', async () => {
+        const terminated = await applyMitigation('BLOCK', res, ['203.0.113.6', 'device-6'], store);
+
+        expect(terminated).toBe(true);
+        expect((await store.findStatus('203.0.113.6')).isBlocked).toBe(true);
+        expect(await store.findStatus('device-6')).toBeNull();
+    });
+
+    it('does not rewrite an identity whose block was already cleared', async () => {
+        store._rows.set('device-7', { isBlocked: false, blockedUntil: null });
+        let clearCalls = 0;
+        const clear = store.clear;
+        store.clear = async (id) => { clearCalls++; return clear(id); };
+
+        await applyMitigation('ALLOW', res, 'device-7', store);
+
+        expect(clearCalls).toBe(0);
+    });
+
     it('clears a stale (expired) block when a later request comes through', async () => {
         // Manually seed an already-expired block, bypassing block() so the
         // expiry is in the past rather than governed by

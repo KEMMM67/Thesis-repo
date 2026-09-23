@@ -75,7 +75,7 @@ function isEnabled() {
  * @param {string} ip
  * @returns {string}
  */
-function normalizeIp(ip) {
+export function normalizeIp(ip) {
     if (!ip) return ip;
     return ip.startsWith('::ffff:') ? ip.slice(7) : ip;
 }

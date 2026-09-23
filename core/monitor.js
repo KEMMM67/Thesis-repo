@@ -58,10 +58,22 @@ export function getFeatures(user, endpoint) {
     // recent behavior only.
     userData.requests = userData.requests.filter(time => now - time < securityConfig.windowMs);
 
+    // Date.now() only resolves to whole milliseconds, so several prior
+    // requests can share the current millisecond exactly - requests arriving
+    // together over parallel connections can do this. The previous
+    // `timeDiff > 0 ? ... : 0` guard then reported a rate of 0, scoring the
+    // fastest possible burst as no velocity at all. Treating that span as
+    // 1 ms instead makes the rate a lower bound rather than a false zero:
+    // n prior requests inside one millisecond is at least n x 1000 req/s.
+    // Worked example: a burst's 3rd request with 2 prior requests in the same
+    // millisecond -> 2 / 1 ms = 2000 req/s, and against a fresh device's
+    // baseline of 0 that scores min(100, 2000 x 2 x 2 x 5) = 100 -> BLOCK,
+    // where the old guard gave it only the floor score, 2 x 2 x 2 x 5 = 40
+    // (LOG).
     let rate = 0;
     if (userData.requests.length > 1) {
-        const timeDiff = now - userData.requests[0];
-        rate = timeDiff > 0 ? (userData.requests.length / timeDiff) * 1000 : 0;
+        const timeDiff = Math.max(now - userData.requests[0], 1);
+        rate = (userData.requests.length / timeDiff) * 1000;
     }
 
     return {
@@ -87,9 +99,23 @@ export function updateFeatures(user, endpoint) {
 
     userData.requests.push(now);
 
-    if (AUTH_ATTEMPT_ENDPOINT_MARKERS.some(marker => endpoint.includes(marker))) {
+    if (isAuthAttemptEndpoint(endpoint)) {
         userData.loginAttempts += 1;
     }
+}
+
+/**
+ * Whether a request to `endpoint` is a credential-verification attempt (a
+ * password at /api/login or an OTP at /api/verify-otp - see
+ * AUTH_ATTEMPT_ENDPOINT_MARKERS above). Shared with
+ * middleware/securityMiddleware.js, which also counts these per IP
+ * (core/ipAttempts.js).
+ *
+ * @param {string} endpoint
+ * @returns {boolean}
+ */
+export function isAuthAttemptEndpoint(endpoint) {
+    return AUTH_ATTEMPT_ENDPOINT_MARKERS.some(marker => endpoint.includes(marker));
 }
 
 /**

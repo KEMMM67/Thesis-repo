@@ -40,7 +40,7 @@ function sendBlockedResponse(res, blockedUntil) {
 
 /**
  * Enforces the Decision Engine's verdict (core/decisionEngine.js) against a
- * request's originating identifier.
+ * request's originating identifier(s).
  *
  * State is persisted via the injected `ipTrackingStore` (see
  * core/ports.js#IpTrackingStore; the default, Prisma-backed
@@ -51,11 +51,12 @@ function sendBlockedResponse(res, blockedUntil) {
  * function itself has no idea what actually backs that store - Postgres
  * today, anything else tomorrow.
  *
- * Note: `identifier` is populated from the `x-device-id` header (falling
- * back to `req.ip` - see core/monitor.js) and is not necessarily a true IP
- * address, despite `IpTrackingStore` implementations typically keying on
- * an `ipAddress`-named column. This mismatch predates this function and is
- * documented here rather than silently carried forward.
+ * Note: an identifier is either a validated `x-device-id` or a normalized IP
+ * (see middleware/clientIdentity.js), so it is not necessarily a true IP
+ * address, despite `IpTrackingStore` implementations typically keying on an
+ * `ipAddress`-named column. This naming mismatch predates this function and
+ * is documented here rather than silently carried forward. The two kinds can
+ * never collide: a valid device ID cannot contain the "." or ":" every IP has.
  *
  * A BLOCK response (fresh or an already-active lockout) includes
  * `retryAfterSeconds`, computed from the real `blockedUntil` rather than a
@@ -63,29 +64,46 @@ function sendBlockedResponse(res, blockedUntil) {
  * reloading on a timer unrelated to how long the lockout actually lasts
  * (see public/admin_login.js and public/script.js).
  *
+ * A request can carry more than one identity (see
+ * middleware/securityMiddleware.js: the client-supplied device ID and, before
+ * login, the server-observed IP). The request is refused if ANY of them has
+ * an active block - otherwise a bot blocked by IP could walk straight back in
+ * under a new device ID. A new BLOCK, though, is recorded against the FIRST
+ * identifier only: the identity whose score produced the verdict. Blocking
+ * every identity would mean one device's misbehaviour locks out everyone
+ * sharing its IP; blocking only the responsible one keeps the blast radius to
+ * exactly what was measured.
+ *
  * @param {"BLOCK"|"THROTTLE"|"LOG"|"ALLOW"} decision - Verdict from decideAction().
  * @param {import("express").Response} res - Response used to short-circuit blocked/throttled requests.
- * @param {string} identifier - Device/IP identifier the verdict applies to.
+ * @param {string|string[]} identifiers - Identifier(s) the verdict applies to, the responsible one first. A single string is accepted for callers with one identity.
  * @param {import("./ports.js").IpTrackingStore} ipTrackingStore - Injected block-tracking store.
  * @returns {Promise<boolean>} `true` if the request was terminated (blocked
  *          or throttled) and the caller must not proceed; `false` otherwise.
  */
-export async function applyMitigation(decision, res, identifier, ipTrackingStore) {
+export async function applyMitigation(decision, res, identifiers, ipTrackingStore) {
+    const ids = Array.isArray(identifiers) ? identifiers : [identifiers];
     const now = new Date();
 
     // An existing, still-active lockout takes precedence over the current
-    // request's own verdict - an already-blocked device stays rejected even
-    // on a request that would otherwise score as ALLOW/LOG.
-    const existing = await ipTrackingStore.findStatus(identifier);
+    // request's own verdict - an already-blocked identity stays rejected even
+    // on a request that would otherwise score as ALLOW/LOG. With several
+    // active blocks, the countdown reports the one that lifts last, since the
+    // request is refused until all of them have.
+    const statuses = await Promise.all(ids.map(id => ipTrackingStore.findStatus(id)));
+    const activeUntil = statuses
+        .filter(status => status?.isBlocked && status.blockedUntil && status.blockedUntil > now)
+        .map(status => status.blockedUntil)
+        .sort((a, b) => b - a)[0];
 
-    if (existing?.isBlocked && existing.blockedUntil && existing.blockedUntil > now) {
-        sendBlockedResponse(res, existing.blockedUntil);
+    if (activeUntil) {
+        sendBlockedResponse(res, activeUntil);
         return true;
     }
 
     if (decision === 'BLOCK') {
         const blockedUntil = new Date(now.getTime() + securityConfig.mitigation.temporaryBlockMs);
-        await ipTrackingStore.block(identifier, blockedUntil);
+        await ipTrackingStore.block(ids[0], blockedUntil);
         sendBlockedResponse(res, blockedUntil);
         return true;
 
@@ -100,15 +118,22 @@ export async function applyMitigation(decision, res, identifier, ipTrackingStore
         return true;
     }
 
-    // ALLOW/LOG require no mitigation. A block is recorded only once a
-    // device earns a BLOCK, so the store stays a record of genuine
+    // ALLOW/LOG require no mitigation. A block is recorded only once an
+    // identity earns a BLOCK, so the store stays a record of genuine
     // incidents rather than every request seen.
-    if (existing && (!existing.isBlocked || (existing.blockedUntil && existing.blockedUntil <= now))) {
-        // Lockout has expired - clear the stale flag so the dashboard stops
-        // reporting the device as blocked. Best-effort; failure here does
-        // not affect the current request (see IpTrackingStore#clear).
-        await ipTrackingStore.clear(identifier);
-    }
+    //
+    // A lockout that has expired is cleared so the dashboard stops reporting
+    // it as blocked. Only a flag that is still set needs clearing: this used
+    // to "clear" rows that were already clear too, costing a pointless UPDATE
+    // on every request from any identity that had ever been blocked - now
+    // doubled by checking two identities per login attempt. Best-effort;
+    // failure here does not affect the current request (see
+    // IpTrackingStore#clear).
+    await Promise.all(ids.map((id, i) => {
+        const status = statuses[i];
+        const expired = status?.isBlocked && status.blockedUntil && status.blockedUntil <= now;
+        return expired ? ipTrackingStore.clear(id) : null;
+    }));
 
     return false;
 }

@@ -3,6 +3,8 @@ import jwt from "jsonwebtoken";
 import { randomInt, timingSafeEqual } from "crypto";
 import prisma from "../config/prisma.js";
 import { resetFeatures } from "../core/monitor.js";
+import { clearAttempts } from "../core/ipAttempts.js";
+import { getClientIdentity } from "../middleware/clientIdentity.js";
 import { sendLoginAlert, sendOtpEmail } from "../utils/emailService.js";
 
 /**
@@ -100,6 +102,10 @@ function otpMatches(submitted, stored) {
  */
 async function completeLogin(user, ipAddress, deviceId, res) {
     resetFeatures(deviceId);
+    // The IP's recent-attempt count is shared by everyone behind that
+    // address, so one person's successful login clears it for the next -
+    // see core/ipAttempts.js for why, and for the residual risk.
+    clearAttempts(ipAddress);
 
     const tokenTtlMs = 60 * 60 * 1000; // must match the JWT expiresIn below
     const token = jwt.sign(
@@ -253,8 +259,9 @@ async function beginOtpChallenge(user, res) {
  */
 export async function login(req, res) {
     const { email, password } = req.body;
-    const ipAddress = req.ip || req.connection.remoteAddress || '127.0.0.1';
-    const deviceId = req.headers["x-device-id"] || req.ip;
+    // Same identity derivation securityMiddleware scored this request under,
+    // so completeLogin() clears exactly those keys.
+    const { ip: ipAddress, deviceKey: deviceId } = getClientIdentity(req);
 
     try {
         const user = await prisma.user.findUnique({ where: { email } });
@@ -301,8 +308,7 @@ export async function login(req, res) {
  */
 export async function verifyOtp(req, res) {
     const { email, otp } = req.body;
-    const ipAddress = req.ip || req.connection.remoteAddress || '127.0.0.1';
-    const deviceId = req.headers["x-device-id"] || req.ip;
+    const { ip: ipAddress, deviceKey: deviceId } = getClientIdentity(req);
 
     if (!email || !otp) {
         return res.status(400).json({ success: false, message: "Email and OTP are required." });

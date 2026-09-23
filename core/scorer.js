@@ -203,7 +203,7 @@ export const defaultWevaConfig = {
                                    // password guesses, so a higher weight here would compound
                                    // with that shared counter and throttle a legitimate user off
                                    // a single mistyped-then-corrected code; matching /api/login's
-                                   // weight instead reuses its already-tuned 5th/9th-attempt
+                                   // weight instead reuses its already-tuned 5th/8th-attempt
                                    // throttle/block cadence (see the worked examples in
                                    // computeScore() below) without new tuning.
         "/api/admin/logs": 2,     // exposes the security audit trail itself
@@ -259,9 +259,14 @@ Object.freeze(defaultWevaConfig);
  *     no admin tolerance applies):
  *       2 * 2 * 3 * 5 = 60  -> THROTTLE.
  *
- *   - The same device's 9th rapid login attempt (8 prior, failRateFactor =
- *     1 + 8*0.5 = 5):
- *       2 * 2 * 5 * 5 = 100 -> BLOCK.
+ *   - The same device's 7th attempt (6 prior, failRateFactor = 4):
+ *       2 * 2 * 4 * 5 = 80  -> still THROTTLE (below block=85).
+ *
+ *   - Its 8th attempt (7 prior, failRateFactor = 1 + 7*0.5 = 4.5) is the
+ *     first BLOCK:
+ *       2 * 2 * 4.5 * 5 = 90 -> BLOCK.
+ *     (The 9th, at 8 prior, reaches the 100 ceiling - also BLOCK, but
+ *     not the first one.)
  *
  * The function returns the itemized factors alongside the final score, not
  * just the number, so every score is independently auditable:

@@ -59,6 +59,13 @@ describe('WEVA computeScore', () => {
         });
     });
 
+    it('keeps the 7th attempt below block (80) and first crosses block=85 on the 8th (90)', () => {
+        const seventh = computeScore({ requestRate: 0, loginAttempts: 6, endpoint: '/api/login' }, { requestRate: 0 });
+        const eighth = computeScore({ requestRate: 0, loginAttempts: 7, endpoint: '/api/login' }, { requestRate: 0 });
+        expect(seventh.score).toBe(80);
+        expect(eighth.score).toBe(90);
+    });
+
     it('BLOCKs the same device on its 9th unresolved login attempt at score 100', () => {
         const { score } = computeScore(
             { requestRate: 0, loginAttempts: 8, endpoint: '/api/login' },
