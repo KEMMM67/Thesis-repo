@@ -16,8 +16,8 @@ import { MemoryStateStore } from "./stateStore.js";
  * It differs from the device history in two deliberate ways:
  *
  *   1. It only remembers the last `securityConfig.windowMs` (30 s), where a
- *      device remembers every attempt until its next successful login. An
- *      IP is shared - a campus NAT puts hundreds of students behind one
+ *      device remembers every attempt until a successful login settles it.
+ *      An IP is shared - a campus NAT puts hundreds of students behind one
  *      address - so an IP history that never forgot would, after a single
  *      attack, keep refusing the whole campus for as long as anyone there
  *      kept trying to log in, since every new attempt would keep it alive.
@@ -44,53 +44,80 @@ import { MemoryStateStore } from "./stateStore.js";
  * That is exactly the ladder a single device gets - rotating IDs buys the
  * attacker nothing.
  *
- * controllers/authController.js clears an IP's attempts on any successful
- * login from it, for the same NAT reason: one student mistyping a password
- * three times should not start the next student on that network three rungs
- * up the ladder. The residual risk, stated plainly: an attacker who owns a
- * valid account on the same network can log into it between guesses to
- * reset this counter - though their device history still accumulates unless
- * they also rotate device IDs.
+ * Each attempt is stored with the account it targeted, and a successful
+ * login settles only that account's attempts (settleIpAttempts() below,
+ * called from controllers/authController.js#completeLogin). This used to
+ * clear the IP's whole window on any successful login, so that one student
+ * mistyping a password three times would not start the next student on
+ * that network three rungs up the ladder. But that also let an attacker
+ * who owns any valid account reset the window by logging into it between
+ * guesses - and since the device history was reset the same way, the
+ * earlier note here that "their device history still accumulates" was
+ * wrong: the combination was a complete bypass.
+ *
+ * Settling per account keeps the campus case and closes the bypass:
+ *
+ *   - Student A mistypes twice, then logs in. All three attempts target A,
+ *     so A's success settles all three and the next student on the network
+ *     starts at 0 - the same outcome as clearing the whole window.
+ *   - A bot rotating device IDs guesses at account V while students log in
+ *     around it. Each success settles only that student's own attempts;
+ *     the bot's attempts at V stay in the window, so it still climbs the
+ *     4 / 3 / BLOCK ladder above.
+ *
+ * The trade-off that remains, stated plainly: unsettled failures belong to
+ * the address, so while a bot behind a shared IP keeps its window full, a
+ * legitimate first attempt from that same IP is scored against the bot's
+ * failures too, and an IP-level BLOCK refuses everyone behind the address
+ * for its 60 s. That is inherent to scoring a shared identifier; the
+ * alternative - answering an IP-level verdict with a challenge such as a
+ * CAPTCHA rather than a refusal - is future work.
  */
 const store = new MemoryStateStore();
 
 /**
- * Returns the IP's attempt timestamps from inside the window, dropping older
- * ones from the stored entry as a side effect so it never grows unbounded.
+ * Returns the IP's attempts from inside the window, dropping older ones
+ * from the stored entry as a side effect so it never grows unbounded.
  *
  * @param {string} ip
  * @param {number} now
- * @returns {number[]}
+ * @returns {Array<{time: number, account: string}>}
  */
-function recentTimes(ip, now) {
-    const entry = store.getOrCreate(ip, () => ({ times: [] }));
-    entry.times = entry.times.filter(time => now - time < securityConfig.windowMs);
-    return entry.times;
+function recentAttempts(ip, now) {
+    const entry = store.getOrCreate(ip, () => ({ attempts: [] }));
+    entry.attempts = entry.attempts.filter(attempt => now - attempt.time < securityConfig.windowMs);
+    return entry.attempts;
 }
 
 /**
  * @param {string} ip
- * @returns {number} Authentication attempts from this IP within the window.
+ * @returns {number} Unsettled authentication attempts from this IP within the window, across all target accounts.
  */
 export function countRecentAttempts(ip) {
-    return recentTimes(ip, Date.now()).length;
+    return recentAttempts(ip, Date.now()).length;
 }
 
 /**
  * @param {string} ip
+ * @param {string} [account=""] - Normalized account the attempt targets (middleware/clientIdentity.js#readTargetAccount).
  * @returns {void}
  */
-export function recordAttempt(ip) {
+export function recordAttempt(ip, account = '') {
     const now = Date.now();
-    recentTimes(ip, now).push(now);
+    recentAttempts(ip, now).push({ time: now, account });
 }
 
 /**
- * Forgets an IP's recent attempts - called on a successful login from it.
+ * Settles the attempts this IP made against `account` - called on a
+ * successful login to that account from this IP. Attempts against other
+ * accounts stay in the window (see this file's @fileoverview for why).
  *
  * @param {string} ip
+ * @param {string} account - Normalized account that just logged in (middleware/clientIdentity.js#normalizeAccount).
  * @returns {void}
  */
-export function clearAttempts(ip) {
-    if (store.has(ip)) store.set(ip, { times: [] });
+export function settleIpAttempts(ip, account) {
+    if (!store.has(ip)) return;
+    const entry = store.getOrCreate(ip, () => ({ attempts: [] }));
+    entry.attempts = entry.attempts.filter(attempt => attempt.account !== account);
 }

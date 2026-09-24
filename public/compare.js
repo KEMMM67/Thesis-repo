@@ -86,7 +86,8 @@ function testRuleBased() {
 // config/securityConfig.js's defaults:
 //   - core/monitor.js: request rate across the last 30 s, and the count
 //     of prior login attempts;
-//   - core/profiler.js: the device's EMA baseline rate (alpha 0.1);
+//   - core/profiler.js: the device's EMA baseline rate (alpha 0.1), learned
+//     only from attempts WEVA let through (ALLOW or LOG);
 //   - core/decisionEngine.js: thresholds for a request that is not signed
 //     in yet (LOG 25, THROTTLE 60, BLOCK 85, no role tolerance);
 //   - core/mitigation.js: a BLOCK locks the device out for 60 s.
@@ -130,11 +131,16 @@ function scoreAttempt(now) {
         { requestRate: device.baselineRate }
     );
 
+    const decision = decide(result.score);
+
     device.requests.push(now);
     device.loginAttempts += 1;
-    device.baselineRate = requestRate * WEVA_EMA_ALPHA + device.baselineRate * (1 - WEVA_EMA_ALPHA);
+    // A throttled or blocked attempt is never learned as normal.
+    if (decision === 'ALLOW' || decision === 'LOG') {
+        device.baselineRate = requestRate * WEVA_EMA_ALPHA + device.baselineRate * (1 - WEVA_EMA_ALPHA);
+    }
 
-    return { ...result, decision: decide(result.score) };
+    return { ...result, decision };
 }
 
 /**

@@ -411,11 +411,18 @@ if (!localStorage.getItem('authToken')) {
                 row.dataset.identifier = device.ipAddress;
                 // Read back by the click handler below to compute an
                 // accurate countdown if this row turns out to be the
-                // admin's own currently-blocked device.
+                // admin's own currently-blocked device or account.
                 row.dataset.blockedUntil = device.blockedUntil || '';
+                // Set only for an account-level block ("user:<id>" - see
+                // middleware/securityMiddleware.js), which the server names
+                // by email instead of the bare key.
+                row.dataset.accountEmail = device.accountEmail || '';
                 const blockedUntilText = device.blockedUntil ? new Date(device.blockedUntil).toLocaleString() : '—';
+                const identity = device.accountEmail
+                    ? `<strong>${escapeHtml(device.accountEmail)}</strong> <span class="badge bg-warning">Account</span>`
+                    : `<strong>${escapeHtml(device.ipAddress)}</strong>`;
                 row.innerHTML = `
-                    <td><strong>${escapeHtml(device.ipAddress)}</strong></td>
+                    <td>${identity}</td>
                     <td>${escapeHtml(blockedUntilText)}</td>
                     <td>${escapeHtml(String(device.totalRequests))}</td>
                     <td><button class="btn-text btn-text--danger" data-action="revoke"><i class="fa-solid fa-unlock"></i> Force Logout / Revoke</button></td>
@@ -1167,15 +1174,22 @@ if (!localStorage.getItem('authToken')) {
             // an action that could never have succeeded, and shows the
             // real remaining time (from the row's own blockedUntil) rather
             // than a generic error.
+            const accountEmail = row.dataset.accountEmail;
             const ownDeviceId = await getDeviceFingerprint();
-            if (identifier === ownDeviceId) {
+            const isOwn = accountEmail ? accountEmail === localStorage.getItem('userEmail') : identifier === ownDeviceId;
+            if (isOwn) {
                 const blockedUntil = row.dataset.blockedUntil ? new Date(row.dataset.blockedUntil) : null;
                 const secondsLeft = blockedUntil ? Math.max(1, Math.ceil((blockedUntil.getTime() - Date.now()) / 1000)) : 60;
-                showRateLimitBanner('warning', "You can't unblock your own device from itself while it's active - wait for the countdown, or unblock it from a different admin session/device", secondsLeft);
+                showRateLimitBanner('warning', accountEmail
+                    ? "You can't unblock your own account while it's blocked - wait for the countdown, or unblock it from a different admin account"
+                    : "You can't unblock your own device from itself while it's active - wait for the countdown, or unblock it from a different admin session/device", secondsLeft);
                 return;
             }
 
-            if (!confirm(`Force logout and unblock "${identifier}"?\n\nThis lifts the WEVA block immediately and ends the session of whichever user this device was most recently seen as, if any.`)) return;
+            const question = accountEmail
+                ? `Unblock the account "${accountEmail}"?\n\nThis lifts the WEVA block immediately and ends every active session of this account.`
+                : `Force logout and unblock "${identifier}"?\n\nThis lifts the WEVA block immediately and ends the session of whichever user this device was most recently seen as, if any.`;
+            if (!confirm(question)) return;
 
             const data = await submitAction('/api/admin/blocked-devices/unblock', {
                 method: 'POST',

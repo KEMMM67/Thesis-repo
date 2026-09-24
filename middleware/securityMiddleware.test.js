@@ -1,12 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createSecurityMiddleware } from './securityMiddleware.js';
+import { settleDeviceAttempts } from '../core/monitor.js';
+import { settleIpAttempts } from '../core/ipAttempts.js';
 
 /**
  * @fileoverview Drives the full WEVA request pipeline (identity -> features
  * -> score -> decision -> mitigation) with in-memory fake adapters, no
- * database. Covers the two pipeline-level fixes: simultaneous requests are
- * scored against each other (race condition), and a bot cannot reset its
- * failure history by rotating its client-supplied x-device-id (IP layer).
+ * database. Covers the pipeline-level fixes: simultaneous requests are
+ * scored against each other (race condition); a bot cannot reset its
+ * failure history by rotating its client-supplied x-device-id (IP layer
+ * before login, account layer after); logging into your own account does
+ * not reset guesses at someone else's; throttled/blocked traffic is never
+ * learned as normal; and endpoint weights come from the matched route.
  */
 
 let seq = 0;
@@ -23,17 +28,42 @@ function fakeIpTrackingStore() {
     };
 }
 
-function buildMiddleware(store = fakeIpTrackingStore()) {
+function buildMiddleware(store = fakeIpTrackingStore(), { resolve = async () => null } = {}) {
+    const audits = [];
     const middleware = createSecurityMiddleware({
-        auditSink: { recordEvaluation: async () => {} },
+        auditSink: { recordEvaluation: async (evaluation) => { audits.push(evaluation); } },
         ipTrackingStore: store,
-        identityResolver: { resolve: async () => null }
+        identityResolver: { resolve }
     });
-    return { middleware, store };
+    return { middleware, store, audits };
 }
 
-function loginRequest({ deviceId, ip }) {
-    return { headers: deviceId ? { 'x-device-id': deviceId } : {}, ip, baseUrl: '/api', path: '/login', body: {} };
+function loginRequest({ deviceId, ip, email }) {
+    return {
+        headers: deviceId ? { 'x-device-id': deviceId } : {}, ip,
+        baseUrl: '/api', path: '/login', route: { path: '/login' },
+        body: email ? { email } : {}
+    };
+}
+
+/** A signed-in admin's DELETE /api/students/:id, on a bulk-seeded student ID. */
+function adminDelete({ deviceId, ip, email = 'admin@x.edu.ph' }) {
+    return {
+        headers: { 'x-device-id': deviceId }, ip, body: {},
+        baseUrl: '', path: '/api/students/CC25-000001', route: { path: '/api/students/:id' },
+        user: { email, role: 'admin' }
+    };
+}
+
+/** Runs `fn` with Date faked, handing it a function that advances the clock. */
+async function withClock(fn) {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+        let now = Date.parse('2026-09-24T03:00:00Z');
+        await fn((ms) => { now += ms; vi.setSystemTime(now); });
+    } finally {
+        vi.useRealTimers();
+    }
 }
 
 async function send(middleware, req) {
@@ -125,5 +155,137 @@ describe('securityMiddleware - IP layer', () => {
         });
 
         expect(result.passed).toBe(true);
+    });
+});
+
+describe('securityMiddleware - own-account logins between guesses (#1)', () => {
+    /** What controllers/authController.js#completeLogin does after a successful login. */
+    const loginSucceeded = (deviceId, ip, email) => {
+        settleDeviceAttempts(deviceId, email);
+        settleIpAttempts(ip, email);
+    };
+
+    /** 30 guesses at a victim, with a login to the attacker's own account after every 3rd. */
+    async function ownAccountAttack({ rotate }) {
+        const { middleware } = buildMiddleware();
+        const fixedDevice = uniqueId('own-account');
+        const ip = uniqueIp();
+        let victimChecks = 0;
+        await withClock(async (advance) => {
+            for (let i = 0; i < 40; i++) {
+                advance(2000);
+                const own = i % 4 === 3;
+                const email = own ? 'attacker@x.edu.ph' : 'victim@x.edu.ph';
+                const deviceId = rotate ? uniqueId('rotating') : fixedDevice;
+                const { passed } = await send(middleware, loginRequest({ deviceId, ip, email }));
+                if (passed && own) loginSucceeded(deviceId, ip, email);
+                if (passed && !own) victimChecks++;
+            }
+        });
+        return victimChecks;
+    }
+
+    it('keeps counting guesses at the victim from one device (was 30 of 30 reaching the password check)', async () => {
+        expect(await ownAccountAttack({ rotate: false })).toBe(4);
+    });
+
+    it('keeps counting them at the IP when the device ID rotates too (was 30 of 30)', async () => {
+        expect(await ownAccountAttack({ rotate: true })).toBe(4);
+    });
+
+    it('still gives the next student on a shared IP a clean start after a typo-then-success', async () => {
+        const { middleware, audits } = buildMiddleware();
+        const ip = uniqueIp();
+        const studentA = uniqueId('student-a');
+        for (let i = 0; i < 3; i++) await send(middleware, loginRequest({ deviceId: studentA, ip, email: 'a@x.edu.ph' }));
+        loginSucceeded(studentA, ip, 'a@x.edu.ph');
+
+        const result = await send(middleware, loginRequest({ deviceId: uniqueId('student-b'), ip, email: 'b@x.edu.ph' }));
+
+        expect(result.passed).toBe(true);
+        expect(audits.at(-1).score).toBe(0);
+    });
+});
+
+describe('securityMiddleware - account layer after login (#2)', () => {
+    it('blocks a stolen admin session rotating x-device-id on its 3rd request, account-wide (was 200 of 200 passing)', async () => {
+        const { middleware, store, audits } = buildMiddleware(undefined, { resolve: async () => ({ id: 4201, role: 'admin' }) });
+        const ip = uniqueIp();
+        const outcomes = [];
+        await withClock(async (advance) => {
+            for (let i = 0; i < 20; i++) {
+                advance(50); // 20 req/s
+                outcomes.push(await send(middleware, adminDelete({ deviceId: uniqueId('rotating'), ip })));
+            }
+        });
+
+        expect(outcomes.slice(0, 3).map(o => o.passed)).toEqual([true, true, false]);
+        expect(outcomes.slice(2).every(o => o.status === 403)).toBe(true);
+        expect(store.rows.get('user:4201')?.isBlocked).toBe(true);
+        expect(audits[2].reason).toMatch(/^Account admin@x\.edu\.ph triggered BLOCK \(requests from every device signed in to it; device \S+ alone scored 0\)/);
+    });
+
+    it('still blocks just the device when one device tells the whole story (ties go to the device)', async () => {
+        const { middleware, store } = buildMiddleware(undefined, { resolve: async () => ({ id: 4202, role: 'admin' }) });
+        const deviceId = uniqueId('fixed-admin');
+        await withClock(async (advance) => {
+            for (let i = 0; i < 5; i++) {
+                advance(50);
+                await send(middleware, adminDelete({ deviceId, ip: uniqueIp() }));
+            }
+        });
+
+        expect(store.rows.get(deviceId)?.isBlocked).toBe(true);
+        expect(store.rows.has('user:4202')).toBe(false);
+    });
+});
+
+describe('securityMiddleware - never learning an attack as normal (#3)', () => {
+    it('keeps a steady 5 req/s flood throttled instead of learning it (was 599 of 600 passing)', async () => {
+        const { middleware } = buildMiddleware(undefined, { resolve: async () => ({ id: 4301, role: 'admin' }) });
+        const deviceId = uniqueId('steady');
+        const outcomes = [];
+        await withClock(async (advance) => {
+            for (let i = 0; i < 150; i++) {
+                advance(200);
+                outcomes.push(await send(middleware, adminDelete({ deviceId, ip: '198.51.100.30' })));
+            }
+        });
+
+        // Requests 1-2 have no rate yet; from the 3rd on, 5 x 3 x 1 x 5 = 75,
+        // the admin THROTTLE threshold (60 + 15), every single time.
+        expect(outcomes.slice(0, 2).every(o => o.passed)).toBe(true);
+        expect(outcomes.slice(2).every(o => o.status === 429)).toBe(true);
+    });
+
+    it('blocks a 20 req/s flood again the moment its lockout ends (was ~1,800 passing after the first block)', async () => {
+        const { middleware } = buildMiddleware(undefined, { resolve: async () => ({ id: 4302, role: 'admin' }) });
+        const deviceId = uniqueId('flood');
+        const outcomes = [];
+        await withClock(async (advance) => {
+            for (let i = 0; i < 1800; i++) { // 90 s
+                advance(50);
+                outcomes.push(await send(middleware, adminDelete({ deviceId, ip: '198.51.100.31' })));
+            }
+        });
+
+        expect(outcomes.filter(o => o.passed)).toHaveLength(2);
+    });
+});
+
+describe('securityMiddleware - endpoint weight from the matched route (#4)', () => {
+    it('weights a bulk-seeded student DELETE at 3x through its route pattern (was 1x)', async () => {
+        const { middleware, audits } = buildMiddleware(undefined, { resolve: async () => ({ id: 4401, role: 'admin' }) });
+        await send(middleware, adminDelete({ deviceId: uniqueId('weight'), ip: uniqueIp() }));
+        expect(audits[0].reason).toMatch(/\| 0 x 3 x 1 x 5 = 0$/);
+    });
+
+    it('keeps the router mount path, so /login still scores at its 2x weight', async () => {
+        const { middleware, audits } = buildMiddleware();
+        const deviceId = uniqueId('weight-login');
+        const ip = uniqueIp();
+        await send(middleware, loginRequest({ deviceId, ip, email: 'x@x.edu.ph' }));
+        await send(middleware, loginRequest({ deviceId, ip, email: 'x@x.edu.ph' }));
+        expect(audits[1].reason).toMatch(/ x 2 x /);
     });
 });

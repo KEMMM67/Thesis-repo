@@ -82,17 +82,27 @@ function getVelocityIncrement(currentFeatures, baselineFeatures, minVelocityFloo
 /**
  * Collapses dynamic path segments to their route pattern so an
  * `endpointWeights` table needs one entry per route rather than per
- * concrete ID. Handles numeric database IDs, alphanumeric student ID
- * codes (e.g. "A23-00001"), and subject codes (e.g. "SE301"). Pure
- * path-shape logic with nothing app-specific in it, so - unlike
- * `endpointWeights` itself - this needs no config parameter.
+ * concrete ID. Handles numeric database IDs, student ID codes in both of
+ * this app's formats (e.g. "A23-00001" and the bulk-seeded "CC25-000001"),
+ * and subject codes (e.g. "SE301"). Pure path-shape logic with nothing
+ * app-specific in it, so - unlike `endpointWeights` itself - this needs no
+ * config parameter.
+ *
+ * This is now only the fallback. middleware/securityMiddleware.js hands the
+ * scorer the Express route pattern that matched the request (e.g.
+ * "/api/students/:id") whenever there is one, which contains no ID to
+ * guess at, so this regex only matters when WEVA is mounted app-wide with
+ * app.use(), where no route has matched yet. Guessing IDs by their shape is
+ * what used to go wrong: the regex recognised only one-letter IDs, so a
+ * DELETE of any of the 15,000 bulk-seeded students ("CC25-000001") fell
+ * through to the default weight - 1x instead of 3x.
  *
  * @param {string} rawPath - Raw request path.
  * @returns {string} Path with dynamic ID segments replaced by ":id".
  */
 function normalizePath(rawPath) {
     return rawPath.replace(
-        /\/([0-9]+|[A-Za-z]\d{2}-\d{4,5}|[A-Za-z]{2,4}\d{3})(?=\/|$)/g,
+        /\/([0-9]+|[A-Za-z]{1,4}\d{2}-\d{4,6}|[A-Za-z]{2,4}\d{3})(?=\/|$)/g,
         "/:id"
     );
 }
@@ -114,12 +124,14 @@ function getEndpointWeight(endpoint, endpointWeights, defaultEndpointWeight) {
 // ---------------------------------------------------------------------
 /**
  * `failRateIncrement` is the amplification applied per outstanding login
- * attempt. core/monitor.js tracks `loginAttempts` as requests to the
- * login endpoint since the device's last successful login (reset via
- * resetFeatures()), making it a proxy for "this device keeps failing /
- * retrying." When no attempts are outstanding the factor resolves to
- * exactly 1 (a no-op), so it only ever amplifies the score and never
- * distorts normal traffic.
+ * attempt. core/monitor.js tracks `loginAttempts` as the device's
+ * authentication attempts that no successful login has settled yet - a
+ * success settles only the attempts aimed at its own account (see
+ * core/monitor.js#settleDeviceAttempts), so logging into one account never
+ * erases failures against another. That makes it a proxy for "this device
+ * keeps failing / retrying." When no attempts are outstanding the factor
+ * resolves to exactly 1 (a no-op), so it only ever amplifies the score and
+ * never distorts normal traffic.
  *
  *   failRateFactor = 1 + (loginAttempts * failRateIncrement)
  *
@@ -154,9 +166,11 @@ function getFailRateFactor(loginAttempts, failRateIncrement) {
  *   3x - endpoints that create or mutate a single persistent record
  *   4x - destructive or infrastructure-wide endpoints
  *
- * Paths are matched after normalizePath() collapses dynamic ID segments
- * to a single ":id" placeholder, so concrete requests resolve to their
- * route's dictionary entry rather than the default weight. PUT and DELETE
+ * Keys are Express route patterns. middleware/securityMiddleware.js scores
+ * each request under the pattern that matched it ("/api/students/:id"),
+ * and normalizePath() collapses concrete IDs to ":id" when no pattern is
+ * available, so every request resolves to its route's dictionary entry
+ * rather than the default weight. PUT and DELETE
  * on the same resource path (e.g. "/api/students/:id") share the same 3x
  * tier: both mutate a single record, and distinguishing them would
  * require threading the HTTP method through

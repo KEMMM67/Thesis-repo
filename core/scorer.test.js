@@ -38,6 +38,15 @@ describe('WEVA computeScore', () => {
         expect(score).toBe(45);
     });
 
+    it('falls back to the 3x mutation weight for bulk-seeded student IDs too (CC25-000001)', () => {
+        // Used only when no Express route pattern is available (WEVA mounted
+        // app-wide). The regex used to recognise only one-letter IDs, so this
+        // path fell through to the default 1x weight.
+        for (const endpoint of ['/api/students/CC25-000001', '/api/students/A23-00001', '/api/students/:id']) {
+            expect(computeScore({ requestRate: 3, loginAttempts: 0, endpoint }, { requestRate: 0 }).breakdown.endpointWeight).toBe(3);
+        }
+    });
+
     it('THROTTLEs a device on its 5th unresolved login attempt at score 60', () => {
         const result = computeScore(
             // requestRate: 0 isolates minVelocityFloor's effect - this

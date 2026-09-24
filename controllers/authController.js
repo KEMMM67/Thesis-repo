@@ -2,9 +2,9 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { randomInt, timingSafeEqual } from "crypto";
 import prisma from "../config/prisma.js";
-import { resetFeatures } from "../core/monitor.js";
-import { clearAttempts } from "../core/ipAttempts.js";
-import { getClientIdentity } from "../middleware/clientIdentity.js";
+import { settleDeviceAttempts } from "../core/monitor.js";
+import { settleIpAttempts } from "../core/ipAttempts.js";
+import { getClientIdentity, normalizeAccount } from "../middleware/clientIdentity.js";
 import { sendLoginAlert, sendOtpEmail } from "../utils/emailService.js";
 
 /**
@@ -31,6 +31,35 @@ import { sendLoginAlert, sendOtpEmail } from "../utils/emailService.js";
 
 /** OTP validity window: 5 minutes from issuance, so an intercepted or leaked code stops working quickly. */
 const OTP_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Wrong codes allowed per issued OTP before it is cancelled (see
+ * verifyOtp()). Without a cap, the only thing between an attacker who
+ * already holds an admin's password and the 1,000,000 possible codes was
+ * WEVA's rate scoring - which the own-account and device-rotation tricks
+ * (core/monitor.js#settleDeviceAttempts, middleware/securityMiddleware.js)
+ * could get around. With it, each code can be guessed at most 5 times: a
+ * 5 in 1,000,000 chance per code, and every fresh code costs another
+ * correct-password login, which WEVA scores as an attempt too.
+ */
+const MAX_OTP_FAILURES = 5;
+
+/**
+ * Wrong-code tally for each admin's pending OTP, keyed by user id:
+ * `{ codeId, failures }`, where `codeId` is the code's expiry timestamp -
+ * unique per issued code, so a tally left over from an earlier code can
+ * never count against a new one.
+ *
+ * Held in memory like the rest of WEVA's per-request state (one server
+ * instance - see core/stateStore.js); a restart forgets tallies, which at
+ * worst grants a pending code 5 more guesses before its 5-minute expiry.
+ * There is at most one entry per admin, removed when the code is verified,
+ * cancelled, expires, or is replaced.
+ */
+const otpFailures = new Map();
+
+/** Shown once a code has been cancelled; public/admin_login.js displays 401 messages as-is. */
+const OTP_CANCELLED_MESSAGE = 'Too many incorrect codes, so this code has been cancelled. Use "Resend code" or sign in again to get a new one.';
 
 /**
  * Generates a cryptographically random 6-digit numeric OTP as a
@@ -73,8 +102,8 @@ function otpMatches(submitted, stored) {
 /**
  * Completes a successful authentication: mints the JWT, persists the
  * backing Session row (see middleware/authMiddleware.js for why a
- * Session row is required, not just a valid signature), clears the
- * device's WEVA attempt history, writes the LOGIN_SUCCESS audit trail,
+ * Session row is required, not just a valid signature), settles the WEVA
+ * attempts aimed at this account, writes the LOGIN_SUCCESS audit trail,
  * and dispatches the best-effort new-sign-in alert email. Always sends
  * exactly one HTTP response; callers should `return` immediately after
  * calling it.
@@ -87,12 +116,17 @@ function otpMatches(submitted, stored) {
  * one implementation rather than writing two slightly-different-looking
  * copies of the same audit trail.
  *
- * resetFeatures(deviceId) is the important ordering detail: it is called
- * here, at true completion, and nowhere earlier in the admin flow. See
- * core/monitor.js#resetFeatures for why clearing WEVA's attempt history
- * right after the password step (before OTP existed, that *was* the
- * completion point) would reopen a brute-force loophole against the OTP
- * step today.
+ * Settling WEVA's attempt history is scoped and ordered deliberately:
+ *
+ *   - Scoped to this account. Only the attempts aimed at `user` are
+ *     settled, on both the device and the IP. Settling everything, as
+ *     this used to, let anyone with a valid account of their own reset
+ *     their guesses at someone else's by logging in between them - see
+ *     core/monitor.js#settleDeviceAttempts for the worked example.
+ *   - Ordered last. It runs here, at true completion, and nowhere earlier
+ *     in the admin flow: settling right after the password step (before
+ *     OTP existed, that *was* the completion point) would let an attacker
+ *     who holds a valid password clear their OTP guesses on demand.
  *
  * @param {import("@prisma/client").User} user - Authenticated user row.
  * @param {string} ipAddress - Originating IP of the request.
@@ -101,11 +135,9 @@ function otpMatches(submitted, stored) {
  * @returns {Promise<void>}
  */
 async function completeLogin(user, ipAddress, deviceId, res) {
-    resetFeatures(deviceId);
-    // The IP's recent-attempt count is shared by everyone behind that
-    // address, so one person's successful login clears it for the next -
-    // see core/ipAttempts.js for why, and for the residual risk.
-    clearAttempts(ipAddress);
+    const account = normalizeAccount(user.email);
+    settleDeviceAttempts(deviceId, account);
+    settleIpAttempts(ipAddress, account);
 
     const tokenTtlMs = 60 * 60 * 1000; // must match the JWT expiresIn below
     const token = jwt.sign(
@@ -201,6 +233,7 @@ async function recordFailedAttempt(email, user, ipAddress, description) {
 async function beginOtpChallenge(user, res) {
     const otpCode = generateOtp();
     const otpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
+    otpFailures.delete(user.id);
 
     try {
         await prisma.user.update({
@@ -296,11 +329,18 @@ export async function login(req, res) {
  * space than a password, so without WEVA scoring this endpoint too, it
  * would be the weakest link in the entire authentication chain.
  *
- * Every rejection path below returns the same 401 status and one of two
- * fixed messages, and none of them ever reveal whether `email` belongs to
- * a real account: an unknown email and a real admin account with no
- * pending OTP both fall into the generic "Invalid or expired OTP" branch,
- * so this endpoint cannot be used to enumerate admin email addresses.
+ * Every rejection path below returns 401, and none of them reveal whether
+ * `email` belongs to a real account: an unknown email and a real admin
+ * account with no pending OTP both fall into the generic "Invalid or
+ * expired OTP" branch, so this endpoint cannot be used to enumerate admin
+ * email addresses. Only an account with a code pending - which takes its
+ * correct password to get - sees the more specific messages below.
+ *
+ * Each code allows MAX_OTP_FAILURES (5) wrong guesses; the 5th cancels it,
+ * so the admin must request a new one. That caps guessing at 5 per code on
+ * its own, independent of WEVA's rate scoring. And a code is consumed with
+ * a conditional update, so it can be used exactly once even when two
+ * requests carry it at the same time.
  *
  * @param {import("express").Request} req
  * @param {import("express").Response} res
@@ -323,17 +363,56 @@ export async function verifyOtp(req, res) {
         }
 
         if (user.otpExpiresAt <= new Date()) {
+            otpFailures.delete(user.id);
             await prisma.user.update({ where: { id: user.id }, data: { otpCode: null, otpExpiresAt: null } });
             await recordFailedAttempt(email, user, ipAddress, 'OTP expired before verification.');
             return res.status(401).json({ success: false, message: "OTP has expired. Please log in again to request a new code." });
         }
 
-        if (!otpMatches(otp, user.otpCode)) {
-            await recordFailedAttempt(email, user, ipAddress, 'Invalid OTP attempted.');
-            return res.status(401).json({ success: false, message: "Invalid OTP. Please try again." });
+        // Read, check and update the wrong-code tally with no `await` in
+        // between, so simultaneous guesses are counted one after another:
+        // a burst of 20 parallel guesses gets 5 comparisons against the
+        // code, not 20. A cancelled code's tally is kept (not deleted) until
+        // a new code replaces it, so a guess that read the code just before
+        // the cancellation reached the database is still refused here.
+        const codeId = user.otpExpiresAt.getTime();
+        const tally = otpFailures.get(user.id);
+        const priorFailures = tally?.codeId === codeId ? tally.failures : 0;
+
+        if (priorFailures >= MAX_OTP_FAILURES) {
+            await recordFailedAttempt(email, user, ipAddress, 'OTP guess refused: the code was already cancelled after too many incorrect attempts.');
+            return res.status(401).json({ success: false, message: OTP_CANCELLED_MESSAGE });
         }
 
-        await prisma.user.update({ where: { id: user.id }, data: { otpCode: null, otpExpiresAt: null } });
+        if (!otpMatches(otp, user.otpCode)) {
+            const failures = priorFailures + 1;
+            otpFailures.set(user.id, { codeId, failures });
+
+            if (failures >= MAX_OTP_FAILURES) {
+                await prisma.user.update({ where: { id: user.id }, data: { otpCode: null, otpExpiresAt: null } });
+                await recordFailedAttempt(email, user, ipAddress, `OTP cancelled after ${MAX_OTP_FAILURES} incorrect attempts.`);
+                return res.status(401).json({ success: false, message: OTP_CANCELLED_MESSAGE });
+            }
+
+            await recordFailedAttempt(email, user, ipAddress, 'Invalid OTP attempted.');
+            const left = MAX_OTP_FAILURES - failures;
+            return res.status(401).json({ success: false, message: `Invalid OTP. ${left} ${left === 1 ? 'attempt' : 'attempts'} left before this code is cancelled.` });
+        }
+
+        // Single use, even under concurrency: the code is consumed only if it
+        // is still the one this request read. Two simultaneous requests with
+        // the same correct code both pass the comparison above, but only the
+        // first matches here - the second finds the code already gone.
+        const consumed = await prisma.user.updateMany({
+            where: { id: user.id, otpCode: user.otpCode },
+            data: { otpCode: null, otpExpiresAt: null }
+        });
+        if (consumed.count !== 1) {
+            await recordFailedAttempt(email, user, ipAddress, 'OTP already used by a simultaneous request.');
+            return res.status(401).json({ success: false, message: "Invalid or expired OTP." });
+        }
+
+        otpFailures.delete(user.id);
         await completeLogin(user, ipAddress, deviceId, res);
     } catch (err) {
         console.error("OTP verification error:", err);

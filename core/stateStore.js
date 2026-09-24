@@ -84,7 +84,9 @@ export class MemoryStateStore {
 
     /**
      * Replaces the value stored under `key` outright, refreshing its idle
-     * clock. Used by core/monitor.js#resetFeatures().
+     * clock. Part of the store's generic get/set contract (the one a
+     * Redis-backed store would implement too); WEVA's own modules currently
+     * update their entries in place through getOrCreate() instead.
      *
      * @param {string} key
      * @param {object} value

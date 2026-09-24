@@ -12,6 +12,7 @@ import prisma from "./config/prisma.js";
 import { securityConfig } from "./config/securityConfig.js";
 import { PrismaAuditSink, PrismaIpTrackingStore, PrismaIdentityResolver } from "./adapters/prisma/index.js";
 import { createWeva } from "./core/weva.js";
+import { parseAccountKey } from "./middleware/clientIdentity.js";
 import { summarizeGrades } from "./utils/gradeSummary.js";
 import { streamDatabaseExport } from "./utils/databaseExport.js";
 
@@ -276,11 +277,15 @@ app.get("/api/admin/scores", ipWhitelistMiddleware, authMiddleware, requireRole(
 /**
  * @route GET /api/admin/blocked-devices
  * @access Admin
- * @description Returns currently-blocked devices from the persistent
- * ipTracking store (core/mitigation.js) for the Blocked Devices panel. Not
- * routed through securityMiddleware for the same reason as
- * /api/admin/scores above: a read-only view of the mitigation layer should
- * not itself feed the mitigation layer.
+ * @description Returns currently-blocked identities from the persistent
+ * ipTracking store (core/mitigation.js) for the Blocked Devices panel:
+ * devices, IPs, and - since WEVA also scores the signed-in account
+ * (middleware/securityMiddleware.js) - whole accounts, stored as
+ * "user:<id>". Each account block gets `accountEmail` so the panel can name
+ * the account instead of showing a bare id. Not routed through
+ * securityMiddleware for the same reason as /api/admin/scores above: a
+ * read-only view of the mitigation layer should not itself feed the
+ * mitigation layer.
  */
 app.get("/api/admin/blocked-devices", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), async (req, res) => {
     try {
@@ -288,7 +293,20 @@ app.get("/api/admin/blocked-devices", ipWhitelistMiddleware, authMiddleware, req
             where: { isBlocked: true, blockedUntil: { gt: new Date() } },
             orderBy: { blockedUntil: 'desc' }
         });
-        res.json({ success: true, devices });
+
+        const accountIds = devices.map(d => parseAccountKey(d.ipAddress)).filter(id => id != null);
+        const accounts = accountIds.length
+            ? await prisma.user.findMany({ where: { id: { in: accountIds } }, select: { id: true, email: true } })
+            : [];
+        const emailById = new Map(accounts.map(a => [a.id, a.email]));
+
+        res.json({
+            success: true,
+            devices: devices.map(d => {
+                const accountId = parseAccountKey(d.ipAddress);
+                return accountId == null ? d : { ...d, accountEmail: emailById.get(accountId) ?? `user #${accountId}` };
+            })
+        });
     } catch (err) {
         console.error("Blocked devices fetch error:", err);
         res.status(500).json({ success: false, message: "Cannot fetch blocked devices." });
@@ -345,24 +363,34 @@ app.get("/api/admin/stats", ipWhitelistMiddleware, authMiddleware, requireRole('
 /**
  * @route POST /api/admin/blocked-devices/unblock
  * @access Admin
- * @description Lifts a WEVA-imposed block early and best-effort revokes
- * the session of the user most recently associated with the device. A
- * security-relevant mutation, so it runs the full middleware chain
- * including securityMiddleware.
+ * @description Lifts a WEVA-imposed block early and revokes the sessions
+ * that go with it. A security-relevant mutation, so it runs the full
+ * middleware chain including securityMiddleware.
  *
- * ipTracking is device/IP-scoped, not user-scoped - a device can be
- * blocked purely from failed login attempts before any session exists.
- * The session to revoke is therefore resolved by looking up the most
- * recent BehaviorLog entry naming this device
- * (`Device ${deviceId} triggered ...`, written by
- * middleware/securityMiddleware.js) and reading its userId. This is a
- * best-effort correlation via existing audit data, not a hard foreign
- * key relationship.
+ * Which sessions depends on what was blocked:
+ *
+ *   - An account ("user:<id>", blocked by WEVA's account layer - see
+ *     middleware/securityMiddleware.js): every session of that account.
+ *     The account layer only decides when an account's traffic is spread
+ *     across devices - the stolen-token pattern - so lifting the block
+ *     without ending those sessions would hand a working token back.
+ *   - A device or IP: ipTracking is device/IP-scoped, not user-scoped - a
+ *     device can be blocked purely from failed login attempts before any
+ *     session exists. The session to revoke is therefore resolved by
+ *     looking up the most recent BehaviorLog entry naming this device
+ *     (`Device ${deviceId} triggered ...`, written by
+ *     middleware/securityMiddleware.js) and reading its userId. This is a
+ *     best-effort correlation via existing audit data, not a hard foreign
+ *     key relationship.
+ *
+ * `identifier` must be a string. It is used as a column value, and anything
+ * else - e.g. {"not": ""} - would reach Prisma as a query operator and
+ * unblock every row at once.
  */
 app.post("/api/admin/blocked-devices/unblock", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { identifier } = req.body || {};
-    if (!identifier) {
-        return res.status(400).json({ success: false, message: "identifier is required." });
+    if (typeof identifier !== 'string' || !identifier) {
+        return res.status(400).json({ success: false, message: "identifier must be a non-empty string." });
     }
 
     try {
@@ -371,22 +399,28 @@ app.post("/api/admin/blocked-devices/unblock", ipWhitelistMiddleware, authMiddle
             data: { isBlocked: false, blockedUntil: null }
         });
 
-        const recentActivity = await prisma.behaviorLog.findFirst({
-            where: { description: { contains: `Device ${identifier} ` } },
-            orderBy: { logTime: 'desc' }
-        });
+        const accountId = parseAccountKey(identifier);
+        let userIdToRevoke = accountId;
+        if (userIdToRevoke == null) {
+            const recentActivity = await prisma.behaviorLog.findFirst({
+                where: { description: { contains: `Device ${identifier} ` } },
+                orderBy: { logTime: 'desc' }
+            });
+            userIdToRevoke = recentActivity?.userId ?? null;
+        }
 
         let sessionsRevoked = 0;
-        if (recentActivity?.userId) {
-            const deleted = await prisma.session.deleteMany({ where: { userId: recentActivity.userId } });
+        if (userIdToRevoke != null) {
+            const deleted = await prisma.session.deleteMany({ where: { userId: userIdToRevoke } });
             sessionsRevoked = deleted.count;
         }
 
+        const unblocked = accountId == null ? 'Device' : 'Account';
         res.json({
             success: true,
             message: sessionsRevoked > 0
-                ? `Device unblocked and ${sessionsRevoked} active session(s) revoked.`
-                : "Device unblocked. No associated active session was found to revoke."
+                ? `${unblocked} unblocked and ${sessionsRevoked} active session(s) revoked.`
+                : `${unblocked} unblocked. No associated active session was found to revoke.`
         });
     } catch (err) {
         console.error("Unblock/revoke error:", err);

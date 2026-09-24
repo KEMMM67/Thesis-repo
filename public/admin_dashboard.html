@@ -107,7 +107,7 @@
                                 <p class="stat-card__meta" id="statSubjectsMeta">&nbsp;</p>
                             </div>
                         </article>
-                        <article class="stat-card" title="Devices and IPs the mitigation layer is locking out right now">
+                        <article class="stat-card" title="Devices, IPs and accounts the mitigation layer is locking out right now">
                             <span class="stat-card__icon stat-card__icon--success" id="statLockoutsIcon"><i class="fa-solid fa-lock"></i></span>
                             <div>
                                 <p class="stat-card__label">Active Lockouts</p>
@@ -358,7 +358,7 @@
                         <div class="panel__header">
                             <div>
                                 <h2 class="panel__title">Blocked Devices (WEVA)</h2>
-                                <p class="panel__subtitle">Devices currently locked out by the mitigation layer (core/mitigation.js), persisted in the database - these survive a server restart. Force Logout / Revoke lifts the block early and, if a session is found for whichever user this device was most recently seen as, ends it too.</p>
+                                <p class="panel__subtitle">Devices, IPs and accounts currently locked out by the mitigation layer (core/mitigation.js), persisted in the database - these survive a server restart. Force Logout / Revoke lifts the block early and ends the matching sessions: every session of a blocked account, or the session of whichever user a blocked device was most recently seen as.</p>
                             </div>
                             <div class="panel__actions">
                                 <button class="refresh-btn" id="btnRefreshBlockedDevices"><i class="fa-solid fa-rotate"></i> Refresh</button>
@@ -367,7 +367,7 @@
                         <div class="table-wrap">
                             <table class="data-table has-actions">
                                 <thead>
-                                    <tr><th>Device / IP</th><th>Blocked Until</th><th class="col-num">Times Blocked</th><th>Actions</th></tr>
+                                    <tr><th>Device, IP or Account</th><th>Blocked Until</th><th class="col-num">Times Blocked</th><th>Actions</th></tr>
                                 </thead>
                                 <tbody id="blockedDevicesTableBody">
                                     <tr><td colspan="4">Loading blocked devices...</td></tr>

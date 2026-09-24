@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readDeviceId, getClientIdentity } from './clientIdentity.js';
+import { readDeviceId, getClientIdentity, accountKey, parseAccountKey, normalizeAccount, readTargetAccount } from './clientIdentity.js';
 
 const withHeader = (value, ip = '203.0.113.20') => ({ headers: { 'x-device-id': value }, ip });
 
@@ -33,5 +33,30 @@ describe('getClientIdentity', () => {
 
     it('normalizes IPv4-mapped IPv6 addresses the same way the IP whitelist does', () => {
         expect(getClientIdentity({ headers: {}, ip: '::ffff:127.0.0.1' }).ip).toBe('127.0.0.1');
+    });
+});
+
+describe('account identities', () => {
+    it('keys a signed-in account as user:<id>, short enough for ip_tracking.ip_address (45 chars)', () => {
+        expect(accountKey(17)).toBe('user:17');
+        expect(accountKey(2147483647).length).toBeLessThanOrEqual(45);
+    });
+
+    it('recognises only account keys - never a device ID or an IP - when parsing', () => {
+        expect(parseAccountKey('user:17')).toBe(17);
+        expect(parseAccountKey('DEV-1a2b3c4d')).toBeNull();
+        expect(parseAccountKey('203.0.113.7')).toBeNull();
+        expect(parseAccountKey('user:17x')).toBeNull();
+    });
+
+    it('can never collide with a device ID, which may not contain ":"', () => {
+        expect(readDeviceId(withHeader(accountKey(17)))).toBeNull();
+    });
+
+    it('normalizes the target account of a login attempt so case and spacing do not split it', () => {
+        expect(normalizeAccount(' Alice@X.edu.ph ')).toBe('alice@x.edu.ph');
+        expect(readTargetAccount({ body: { email: 'Alice@X.edu.ph' } })).toBe('alice@x.edu.ph');
+        expect(readTargetAccount({ body: { email: { not: '' } } })).toBe('');
+        expect(readTargetAccount({})).toBe('');
     });
 });

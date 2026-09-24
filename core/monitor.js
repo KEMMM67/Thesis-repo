@@ -2,8 +2,11 @@ import { securityConfig } from "../config/securityConfig.js";
 import { MemoryStateStore } from "./stateStore.js";
 
 /**
- * Backing store for per-user/device request timestamps and login-attempt
- * counts. Previously a bare module-level object (`activeUsers`) that grew
+ * Backing store for per-identity request timestamps and login-attempt
+ * ledgers. The key is whichever identity middleware/securityMiddleware.js is
+ * scoring: a device ID, an IP (for clients that send no device ID), or an
+ * account key ("user:<id>", see middleware/clientIdentity.js#accountKey).
+ * Previously a bare module-level object (`activeUsers`) that grew
  * by one permanent entry for every device/IP ever seen, for the lifetime
  * of the process, with nothing to remove an entry once that device went
  * away - a genuine unbounded-memory-growth bug, not just a style issue.
@@ -39,20 +42,52 @@ const store = new MemoryStateStore();
 const AUTH_ATTEMPT_ENDPOINT_MARKERS = ['login', 'verify-otp'];
 
 /**
- * Derives a user's current behavioral features - request velocity and
+ * A new identity's state.
+ *
+ *   - requests: timestamps inside the scoring window, for velocity.
+ *   - attemptsByAccount: the ledger of authentication attempts not yet
+ *     settled by a successful login, keyed by the account each one was
+ *     aimed at (middleware/clientIdentity.js#readTargetAccount). Recording
+ *     the target, instead of keeping one bare counter, is what lets a
+ *     successful login settle only its own account's attempts - see
+ *     settleDeviceAttempts() below for the attack a bare counter allowed.
+ *
+ * @returns {{requests: number[], attemptsByAccount: Map<string, number>}}
+ */
+function freshState() {
+    return { requests: [], attemptsByAccount: new Map() };
+}
+
+/**
+ * @param {{attemptsByAccount: Map<string, number>}} state
+ * @returns {number} Every attempt still on the ledger, whichever account it targeted.
+ */
+function outstandingAttempts(state) {
+    let total = 0;
+    for (const count of state.attemptsByAccount.values()) total += count;
+    return total;
+}
+
+/**
+ * Derives an identity's current behavioral features - request velocity and
  * outstanding login attempts - for input to core/scorer.js.
  *
  * Velocity is expressed in requests/second rather than requests/ms so that
  * the Weighted Endpoint & Velocity Algorithm operates on human-readable
  * values (e.g. "3.3 req/sec") without altering the underlying ratio.
  *
- * @param {string} user - User identifier (or device identifier for pre-auth requests).
- * @param {string} endpoint - Normalized endpoint path of the current request.
+ * `loginAttempts` counts every unsettled attempt on the ledger, across all
+ * target accounts: a device that has failed against three different
+ * accounts is exactly as suspicious as one that failed three times against
+ * one (the former is password spraying).
+ *
+ * @param {string} user - Identity key (device ID, IP, or account key).
+ * @param {string} endpoint - Endpoint of the current request.
  * @returns {{requestRate: number, loginAttempts: number, endpoint: string}}
  */
 export function getFeatures(user, endpoint) {
     const now = Date.now();
-    const userData = store.getOrCreate(user, () => ({ requests: [], loginAttempts: 0 }));
+    const userData = store.getOrCreate(user, freshState);
 
     // Drop timestamps outside the scoring window so velocity reflects
     // recent behavior only.
@@ -78,29 +113,29 @@ export function getFeatures(user, endpoint) {
 
     return {
         requestRate: rate,
-        loginAttempts: userData.loginAttempts,
+        loginAttempts: outstandingAttempts(userData),
         endpoint
     };
 }
 
 /**
- * Records the current request against the user's tracking state, updating
- * the request history used for velocity calculation and, for login
- * endpoints, the outstanding-attempt counter consumed by the scorer's fail
- * rate factor.
+ * Records the current request against the identity's tracking state: its
+ * timestamp for velocity and, for an authentication endpoint, one more
+ * attempt on the ledger under the account it targeted.
  *
- * @param {string} user - User identifier (or device identifier for pre-auth requests).
- * @param {string} endpoint - Endpoint path of the current request.
+ * @param {string} user - Identity key (device ID, IP, or account key).
+ * @param {string} endpoint - Endpoint of the current request.
+ * @param {string} [account=""] - Normalized target account of a login/OTP attempt (middleware/clientIdentity.js#readTargetAccount); ignored for other endpoints.
  * @returns {void}
  */
-export function updateFeatures(user, endpoint) {
+export function updateFeatures(user, endpoint, account = '') {
     const now = Date.now();
-    const userData = store.getOrCreate(user, () => ({ requests: [], loginAttempts: 0 }));
+    const userData = store.getOrCreate(user, freshState);
 
     userData.requests.push(now);
 
     if (isAuthAttemptEndpoint(endpoint)) {
-        userData.loginAttempts += 1;
+        userData.attemptsByAccount.set(account, (userData.attemptsByAccount.get(account) || 0) + 1);
     }
 }
 
@@ -119,29 +154,60 @@ export function isAuthAttemptEndpoint(endpoint) {
 }
 
 /**
- * Clears a user's tracked request history and login-attempt count.
+ * Settles a device's history after a successful login to `account`: the
+ * attempts it made against that account come off the ledger, and its
+ * velocity window starts over. Attempts it made against any other account
+ * stay exactly where they are.
  *
- * For a non-admin's single-step login this fires as soon as the password
- * matches, same as before two-factor existed. For an admin's two-step
- * login it must NOT fire until the OTP is verified (see
- * controllers/authController.js's completeLogin()) - resetting it after
- * the password step alone would let an attacker who already holds a
- * valid password wipe this device's entire attempt history on demand
- * simply by re-submitting POST /api/login, then take one fresh,
- * unamplified guess at the OTP before resetting again. Only clearing the
- * slate once the full chain succeeds means every OTP guess in between
- * keeps compounding the same fail-rate factor a run of wrong passwords
- * would.
+ * Why only that account. This used to reset the device completely -
+ * velocity and every attempt - on any successful login. That let anyone
+ * with a valid account of their own brute-force someone else's: three
+ * guesses at the victim, one login to their own account (which wiped the
+ * three guesses), repeat. Against the real middleware that got 300 of 300
+ * guesses through to the password check, where the same attack without the
+ * interleaved logins got 4. Settling per account closes that loop.
  *
- * Only resets an entry that already exists, matching this function's
- * original behavior from before MemoryStateStore existed - a device with
- * no tracked state yet has nothing to clear.
+ * Worked example - one device, a student who owns account M guessing at V:
  *
- * @param {string} user - User identifier to reset.
+ *   V, V, V (wrong)  -> ledger { V: 3 }
+ *   M (correct)      -> the M attempt comes off; ledger stays { V: 3 }
+ *   next guess at V  -> 3 attempts outstanding:
+ *                       2 x 2 x (1 + 3 x 0.5) x 5 = 50  (LOG)
+ *   the one after    -> 2 x 2 x 3 x 5 = 60             (THROTTLE)
+ *
+ * - the same ladder as if the M login had never happened (core/scorer.js's
+ * worked examples: THROTTLE on the 5th attempt at V, BLOCK on the 8th).
+ *
+ * A legitimate user is unaffected: mistyping their own password twice and
+ * then getting it right puts all three attempts under their own account, so
+ * the success settles all three - exactly the clean slate the full reset
+ * used to give.
+ *
+ * Why velocity still starts over. The velocity window is not a record of
+ * failures; it measures how fast the device is acting now, and the
+ * login exchange that just finished is not part of whatever the user does
+ * next. Keeping it would let the one or two login requests dilute the rate
+ * of an admin's next actions (the Simulate Attack demo, a burst of edits)
+ * for up to 30 seconds. Clearing it gives an attacker nothing: guessing is
+ * escalated by the ledger above, and a burst is caught on its 3rd request
+ * with no history at all.
+ *
+ * Ordering matters for admins: this runs only once the OTP step succeeds
+ * (controllers/authController.js#completeLogin), never after the password
+ * step alone. Settling there would let an attacker who already holds a valid
+ * password clear the device's OTP guesses on demand by re-submitting the
+ * password, then take a fresh, unamplified guess at the code.
+ *
+ * Only settles an identity that is already tracked - a device with no
+ * state has nothing to settle.
+ *
+ * @param {string} deviceKey - Device key the successful login came from (middleware/clientIdentity.js#getClientIdentity).
+ * @param {string} account - Normalized account that just logged in (middleware/clientIdentity.js#normalizeAccount).
  * @returns {void}
  */
-export function resetFeatures(user) {
-    if (store.has(user)) {
-        store.set(user, { requests: [], loginAttempts: 0 });
-    }
+export function settleDeviceAttempts(deviceKey, account) {
+    if (!store.has(deviceKey)) return;
+    const state = store.getOrCreate(deviceKey, freshState);
+    state.requests = [];
+    state.attemptsByAccount.delete(account);
 }
