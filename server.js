@@ -9,8 +9,11 @@ import https from "https";
 import fs from "fs";
 import { authMiddleware, requireRole } from "./middleware/authMiddleware.js";
 import prisma from "./config/prisma.js";
+import { securityConfig } from "./config/securityConfig.js";
 import { PrismaAuditSink, PrismaIpTrackingStore, PrismaIdentityResolver } from "./adapters/prisma/index.js";
 import { createWeva } from "./core/weva.js";
+import { summarizeGrades } from "./utils/gradeSummary.js";
+import { streamDatabaseExport } from "./utils/databaseExport.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -88,6 +91,22 @@ app.get('/admin', (req, res) => {
     res.sendFile(path.join(PUBLIC_DIR, 'admin_login.html'));
 });
 
+/**
+ * Serves WEVA's production scoring function to the browser, for the
+ * Algorithm Comparative Analysis page (public/compare.html). That page
+ * imports this exact file, so its "WEVA (Ours)" simulation computes every
+ * score with the same code the server runs, and can never drift into a
+ * different formula than the one the manuscript describes.
+ *
+ * core/scorer.js is safe to serve: it is a pure function with no imports,
+ * I/O or secrets. Publishing a detection formula is standard practice
+ * (Kerckhoffs's principle) - security rests on the server enforcing it,
+ * not on an attacker not knowing it.
+ */
+app.get('/weva/scorer.js', (req, res) => {
+    res.sendFile(path.join(__dirname, 'core', 'scorer.js'));
+});
+
 // index: false disables express.static's directory-index behavior; the
 // two explicit routes above already cover '/' and '/admin', so no path in
 // this file can produce a directory listing.
@@ -112,6 +131,51 @@ function formatLogTime(date) {
     const minutes = pad(date.getMinutes());
     const seconds = pad(date.getSeconds());
     return `${year}-${month}-${day} ${pad(hours)}:${minutes}:${seconds} ${ampm}`;
+}
+
+/**
+ * Reads a search box's text from a query parameter. Anything other than a
+ * single string (e.g. `?q=a&q=b`, which arrives as an array) counts as no
+ * search, and the length is capped: no student ID, name or subject title
+ * is anywhere near 100 characters.
+ *
+ * @param {*} value - Raw `req.query` value.
+ * @returns {string} Trimmed search text, or '' for no search.
+ */
+function searchParam(value) {
+    return typeof value === 'string' ? value.trim().slice(0, 100) : '';
+}
+
+/**
+ * Escapes SQL LIKE's wildcards (and its escape character) so `text` is
+ * matched literally. On Postgres, Prisma runs case-insensitive `contains`
+ * and `equals` filters as ILIKE and passes the text through unescaped, so
+ * without this a search for "%" or "_" matched every student, and a lookup
+ * of "A23-0000_" found A23-00001. Typed into a search box during a
+ * security review, that looks exactly like an injection. It is not one -
+ * the text always travels as a bound parameter, never as SQL - but results
+ * should still be exactly what was asked for.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function escapeLike(text) {
+    return text.replace(/[\\%_]/g, '\\$&');
+}
+
+/**
+ * Reads an integer query parameter, falling back when it is missing or not
+ * a number, and clamping it to [min, max].
+ *
+ * @param {*} value - Raw `req.query` value.
+ * @param {number} fallback
+ * @param {number} min
+ * @param {number} max
+ * @returns {number}
+ */
+function intParam(value, fallback, min, max) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isNaN(parsed) ? fallback : Math.min(Math.max(parsed, min), max);
 }
 
 // ---------------------------------------------------------------------
@@ -232,6 +296,53 @@ app.get("/api/admin/blocked-devices", ipWhitelistMiddleware, authMiddleware, req
 });
 
 /**
+ * @route GET /api/admin/stats
+ * @access Admin
+ * @description Live counts behind the Dashboard's stat cards, polled by
+ * public/admin_dashboard.js every few seconds. Not routed through
+ * securityMiddleware, for the same reason as /api/admin/scores above.
+ *
+ * `blockVerdicts` counts requests WEVA itself scored at BLOCK, from the
+ * security_actions audit table. It is a lower bound on requests refused:
+ * a request from an already-blocked device is refused too, but is audited
+ * under whatever its own score was (see core/mitigation.js).
+ * `devicesBlockedNow` is the same query as the Blocked Devices panel.
+ */
+app.get("/api/admin/stats", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), async (req, res) => {
+    try {
+        const now = new Date();
+        const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+        const [studentsEnrolled, studentsTotal, subjects, gradeRecords, blockVerdicts, blockVerdicts24h, devicesBlockedNow] = await Promise.all([
+            prisma.student.count({ where: { status: 'ENROLLED' } }),
+            prisma.student.count(),
+            prisma.subject.count(),
+            prisma.grade.count(),
+            prisma.securityAction.count({ where: { actionTaken: 'BLOCK' } }),
+            prisma.securityAction.count({ where: { actionTaken: 'BLOCK', actionTime: { gte: dayAgo } } }),
+            prisma.ipTracking.count({ where: { isBlocked: true, blockedUntil: { gt: now } } })
+        ]);
+
+        res.json({
+            success: true,
+            stats: {
+                studentsEnrolled,
+                studentsTotal,
+                subjects,
+                gradeRecords,
+                blockVerdicts,
+                blockVerdicts24h,
+                devicesBlockedNow,
+                lockoutSeconds: Math.round(securityConfig.mitigation.temporaryBlockMs / 1000)
+            }
+        });
+    } catch (err) {
+        console.error("Dashboard stats fetch error:", err);
+        res.status(500).json({ success: false, message: "Cannot fetch dashboard stats." });
+    }
+});
+
+/**
  * @route POST /api/admin/blocked-devices/unblock
  * @access Admin
  * @description Lifts a WEVA-imposed block early and best-effort revokes
@@ -286,49 +397,42 @@ app.post("/api/admin/blocked-devices/unblock", ipWhitelistMiddleware, authMiddle
 /**
  * @route GET /api/admin/backup
  * @access Admin
- * @description Exports every modeled table as a downloadable JSON
- * snapshot - an application-level export of the actual rows, distinct
- * from the placeholder database-engine-level backup at
- * POST /api/settings/backup.
+ * @description Streams a JSON snapshot of every table - students,
+ * subjects, grades, users and the full WEVA audit trail - as a file
+ * download (the dashboard's "Export JSON Snapshot" button). See
+ * utils/databaseExport.js for how it stays within a fixed memory budget,
+ * why every table comes from one REPEATABLE READ transaction, and what is
+ * kept out of the file (password hashes, OTP codes, session tokens,
+ * plaintext grades).
  *
- * students/subjects/grades are included as empty arrays rather than
- * omitted, keeping the exported shape forward-compatible; at the time of
- * writing they are represented as dashboard-only placeholder data with no
- * corresponding persisted rows in some deployments of this schema.
+ * This is an application-level export, not the engine-level backup:
+ * restores run through AWS RDS automated snapshots (point-in-time
+ * recovery), outside this web console.
  *
- * `User.passwordHash` and the entire Session table are deliberately
- * excluded: a downloadable file is a worse place for password hashes to
- * live than the database itself, and a backup containing live, unexpired
- * bearer tokens would itself be a security liability.
+ * Once the first bytes are sent, a failure can no longer become a JSON
+ * error response. The connection is aborted instead, so the browser
+ * reports a failed download rather than saving a truncated file that
+ * looks complete.
  */
 app.get("/api/admin/backup", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
-    try {
-        const [users, loginAttempts, anomalyScores, securityActions, behaviorLogs, ipTracking] = await Promise.all([
-            prisma.user.findMany({ select: { id: true, email: true, role: true, createdAt: true } }),
-            prisma.loginAttempt.findMany(),
-            prisma.anomalyScore.findMany(),
-            prisma.securityAction.findMany(),
-            prisma.behaviorLog.findMany(),
-            prisma.ipTracking.findMany()
-        ]);
+    const generatedAt = new Date();
+    const filename = `sis_snapshot_${generatedAt.toISOString().replace(/[:.]/g, '-')}.json`;
+    res.set({
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Cache-Control': 'no-store'
+    });
 
-        res.json({
-            success: true,
-            generatedAt: new Date().toISOString(),
-            generatedBy: req.user.email,
-            students: [],
-            subjects: [],
-            grades: [],
-            users,
-            loginAttempts,
-            anomalyScores,
-            securityActions,
-            behaviorLogs,
-            ipTracking
-        });
+    try {
+        await streamDatabaseExport(prisma, res, { generatedBy: req.user.email, generatedAt });
+        res.end();
     } catch (err) {
-        console.error("Database backup export error:", err);
-        res.status(500).json({ success: false, message: "Backup export failed." });
+        console.error("Database snapshot export error:", err);
+        if (!res.headersSent) {
+            res.removeHeader('Content-Disposition');
+            return res.status(500).json({ success: false, message: "Snapshot export failed." });
+        }
+        res.destroy();
     }
 });
 
@@ -395,27 +499,7 @@ app.get("/api/students/me", authMiddleware, requireRole('student'), async (req, 
             orderBy: { updatedAt: 'desc' }
         });
 
-        const grades = gradeRows.map(g => ({
-            subjectCode: g.subject.subjectCode,
-            subjectTitle: g.subject.subjectTitle,
-            units: g.subject.units,
-            term: g.term,
-            grade: g.grade != null ? Number(g.grade) : null,
-            remarks: g.remarks
-        }));
-
-        // Enrolled units and GWA are computed from the real grade rows above
-        // rather than stored as separate fields, so they can never drift out
-        // of sync with the grades that back them. This seed data uses the
-        // Philippine 1.0 (highest) - 5.0 (lowest) grading scale, so the
-        // average is taken directly (no inversion), and 3.00 is the
-        // conventional passing ceiling for "Good Standing".
-        const numericGrades = grades.map(g => g.grade).filter(g => g != null);
-        const enrolledUnits = grades.reduce((sum, g) => sum + (g.units || 0), 0);
-        const gwa = numericGrades.length
-            ? Math.round((numericGrades.reduce((sum, g) => sum + g, 0) / numericGrades.length) * 100) / 100
-            : null;
-        const academicStanding = gwa == null ? 'No Grades Yet' : (gwa <= 3.00 ? 'Good Standing' : 'On Probation');
+        const { grades, stats } = summarizeGrades(gradeRows);
 
         // Shared display label for the schedule/grades/billing sections
         // below - derived from the grade rows' own term rather than
@@ -435,7 +519,7 @@ app.get("/api/students/me", authMiddleware, requireRole('student'), async (req, 
                 status: student.status,
                 email: user.email
             },
-            stats: { enrolledUnits, gwa, academicStanding },
+            stats,
             grades,
             // ---- Placeholder sections (see the route description above) ----
             schedule: [
@@ -472,12 +556,39 @@ app.get("/api/students/me", authMiddleware, requireRole('student'), async (req, 
 /**
  * @route GET /api/students
  * @access Admin
- * @description Lists all students for the Student Records table.
+ * @description One page of the Student Records table, optionally narrowed
+ * by the table's search box.
+ *
+ * Query parameters:
+ *   - q: case-insensitive text matched against student ID, full name,
+ *     program and department.
+ *   - limit: rows per page, 1-200 (default 100).
+ *   - offset: rows to skip (default 0).
+ *
+ * Paged because the table holds 15,000+ students: returning every row cost
+ * megabytes of JSON and seconds of rendering on each visit. `total` counts
+ * every row matching `q`, not just this page, so the table can report
+ * "1-100 of 15,010".
  */
 app.get("/api/students", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), async (req, res) => {
+    const q = searchParam(req.query.q);
+    const limit = intParam(req.query.limit, 100, 1, 200);
+    // Prisma's skip is a 32-bit integer.
+    const offset = intParam(req.query.offset, 0, 0, 2 ** 31 - 1);
+    const where = q
+        ? {
+            OR: ['studentId', 'fullName', 'program', 'department'].map(field => ({
+                [field]: { contains: escapeLike(q), mode: 'insensitive' }
+            }))
+        }
+        : {};
+
     try {
-        const students = await prisma.student.findMany({ orderBy: { studentId: 'asc' } });
-        res.json({ success: true, students });
+        const [students, total] = await Promise.all([
+            prisma.student.findMany({ where, orderBy: { studentId: 'asc' }, skip: offset, take: limit }),
+            prisma.student.count({ where })
+        ]);
+        res.json({ success: true, students, total, offset, limit });
     } catch (err) {
         console.error("Students fetch error:", err);
         res.status(500).json({ success: false, message: "Cannot fetch students." });
@@ -568,11 +679,22 @@ app.delete("/api/students/:id", ipWhitelistMiddleware, authMiddleware, requireRo
 /**
  * @route GET /api/subjects
  * @access Admin
- * @description Lists all subjects for the Subject Catalog table.
+ * @description Lists subjects for the Subject Catalog table. An optional
+ * `q` narrows the list to subjects whose code, title or department
+ * contains it (case-insensitive). Not paged: a subject catalog is small.
  */
 app.get("/api/subjects", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), async (req, res) => {
+    const q = searchParam(req.query.q);
+    const where = q
+        ? {
+            OR: ['subjectCode', 'subjectTitle', 'department'].map(field => ({
+                [field]: { contains: escapeLike(q), mode: 'insensitive' }
+            }))
+        }
+        : {};
+
     try {
-        const subjects = await prisma.subject.findMany({ orderBy: { subjectCode: 'asc' } });
+        const subjects = await prisma.subject.findMany({ where, orderBy: { subjectCode: 'asc' } });
         res.json({ success: true, subjects });
     } catch (err) {
         console.error("Subjects fetch error:", err);
@@ -655,8 +777,59 @@ app.delete("/api/subjects/:id", ipWhitelistMiddleware, authMiddleware, requireRo
 });
 
 // ---------------------------------------------------------------------
-// GRADE RECORDS (CRUD implemented; not yet wired to a dashboard UI)
+// GRADE RECORDS (read by the Grade Management lookup; create, update and
+// delete are implemented but not yet wired to a dashboard UI)
 // ---------------------------------------------------------------------
+
+/**
+ * @route GET /api/students/:id/grades
+ * @access Admin
+ * @description One student's grade report for the Grade Management
+ * lookup: their record, their grades, and the same units/GWA/standing
+ * summary they see on their own dashboard (see summarizeGrades()). `:id`
+ * is the human-readable studentId, matched case-insensitively so
+ * "ca22-000001" finds CA22-000001.
+ *
+ * Grades are queried through prisma.grade rather than as a nested include
+ * on the student: the field-encryption extension
+ * (adapters/prisma/fieldEncryption.js) decrypts the rows of the model a
+ * query is made on, so grades fetched as a nested relation of a student
+ * would come back as ciphertext.
+ */
+app.get("/api/students/:id/grades", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), async (req, res) => {
+    const id = req.params.id.trim();
+
+    try {
+        const student = await prisma.student.findFirst({
+            where: { studentId: { equals: escapeLike(id), mode: 'insensitive' } }
+        });
+        if (!student) {
+            return res.status(404).json({ success: false, message: `No student found with ID ${id}.` });
+        }
+
+        const gradeRows = await prisma.grade.findMany({
+            where: { studentId: student.id },
+            include: { subject: true },
+            orderBy: { subject: { subjectCode: 'asc' } }
+        });
+
+        res.json({
+            success: true,
+            student: {
+                studentId: student.studentId,
+                fullName: student.fullName,
+                department: student.department,
+                program: student.program,
+                yearLevel: student.yearLevel,
+                status: student.status
+            },
+            ...summarizeGrades(gradeRows)
+        });
+    } catch (err) {
+        console.error("Student grade lookup error:", err);
+        res.status(500).json({ success: false, message: "Cannot fetch this student's grades." });
+    }
+});
 
 /**
  * @route GET /api/grades

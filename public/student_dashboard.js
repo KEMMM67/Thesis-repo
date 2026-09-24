@@ -272,6 +272,19 @@ if (!localStorage.getItem('authToken')) {
     }
 
     /**
+     * Same rule as public/admin_dashboard.js's grade report, so a "Failed"
+     * remark reads as a failure here too instead of a green badge.
+     *
+     * @param {string|null} remarks - e.g. "Passed" or "Failed".
+     * @returns {string} Badge class for the remarks.
+     */
+    function remarksBadgeClass(remarks) {
+        if (/fail/i.test(remarks || '')) return 'bg-danger';
+        if (/pass/i.test(remarks || '')) return 'bg-success';
+        return 'bg-info';
+    }
+
+    /**
      * Populates the Grades Evaluation section from real Grade/Subject rows.
      *
      * @param {object} data - Parsed response body.
@@ -301,7 +314,7 @@ if (!localStorage.getItem('authToken')) {
                 <td>${escapeHtml(g.subjectTitle)}</td>
                 <td>${escapeHtml(g.units)}</td>
                 <td>${g.grade != null ? escapeHtml(g.grade.toFixed(2)) : '—'}</td>
-                <td><span class="badge bg-success">${escapeHtml(g.remarks || '—')}</span></td>
+                <td><span class="badge ${remarksBadgeClass(g.remarks)}">${escapeHtml(g.remarks || '—')}</span></td>
             </tr>
         `).join('');
     }

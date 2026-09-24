@@ -220,7 +220,7 @@ export const defaultWevaConfig = {
         // ---- Destructive / infrastructure-wide endpoints (4x) ----
         "/api/settings/backup": 4,
         "/api/settings/restore": 4, // a bad restore can silently overwrite live data
-        "/api/admin/backup": 4,     // exports every row of every audit table at once
+        "/api/admin/backup": 4,     // exports every table - student records, grades, the audit trail - at once
         "/api/admin/accounts": 4,   // minting a new admin is a standing capability grant
 
         // ---- Demo tooling ----

@@ -32,6 +32,7 @@
         .status-box.blocked { background: #dc3545; color: white; }
         .status-box.allowed { background: #28a745; color: white; }
         .status-box.warning { background: #ffc107; color: black; }
+        .status-box.logged { background: #e8f1fc; color: #1f4f8a; }
 
         .btn-test { width: 100%; padding: 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; background-color: #800000; color: white; font-size: 14px; text-transform: uppercase; }
         .btn-test:hover { background-color: #660000; }
@@ -50,7 +51,7 @@
 
     <div class="container">
         <h1 class="header-text">Security Mitigation Simulation</h1>
-        <p style="color: #666; margin-bottom: 40px;">Test the three algorithms by clicking the "Simulate Login" button. Try clicking slowly, and then try clicking as fast as you can.</p>
+        <p style="color: #666; margin-bottom: 40px;">Each click is one failed login attempt from the same device. Try a slow pace first, then reload the page and click as fast as you can.</p>
 
         <div class="grid">
             <div class="card traditional">
@@ -70,15 +71,18 @@
             </div>
 
             <div class="card agentic">
-                <h2 style="color: #28a745;">⭐ 3. Adaptive EMA (Ours)</h2>
-                <p class="desc">Learns your clicking speed. Punishes sudden spikes but forgives natural fast typists.</p>
-                <div class="status-box" id="status-ema">STATUS: WAITING</div>
-                <button class="btn-test" id="btn-ema">Simulate Login Click</button>
-                <div class="logs" id="log-ema"></div>
+                <h2 style="color: #28a745;">⭐ 3. WEVA (Ours)</h2>
+                <p class="desc">Runs the production formula from core/scorer.js: velocity × endpoint weight × fail-rate. Escalating, temporary.</p>
+                <div class="status-box" id="status-weva">STATUS: WAITING</div>
+                <button class="btn-test" id="btn-weva">Simulate Login Click</button>
+                <div class="logs" id="log-weva"></div>
             </div>
         </div>
     </div>
 
-    <script src="compare.js"></script>
+    <!-- A module script: it imports WEVA's production scoring function from
+         /weva/scorer.js (served by server.js), so open this page through the
+         Express server, not as a local file. -->
+    <script type="module" src="compare.js"></script>
 </body>
 </html>

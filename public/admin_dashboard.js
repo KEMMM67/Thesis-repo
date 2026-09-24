@@ -439,7 +439,100 @@ if (!localStorage.getItem('authToken')) {
     }
 
     /**
-     * Renders the full Student Records table from a students array. Used
+     * @param {number} n
+     * @returns {string} `n` with thousands separators, e.g. "15,010".
+     */
+    function formatCount(n) {
+        return Number(n).toLocaleString('en-US');
+    }
+
+    /**
+     * Fetches and renders the Dashboard's four stat cards from
+     * GET /api/admin/stats (server.js). Declared at top level so the
+     * sidebar navigation handler can refresh them whenever the Dashboard
+     * is reopened; the STAT CARDS block below also refreshes them every
+     * few seconds while it is on screen. A failed refresh leaves the last
+     * values in place rather than blanking the cards.
+     *
+     * @returns {Promise<void>}
+     */
+    async function loadStats() {
+        const setText = (id, text) => {
+            const node = document.getElementById(id);
+            if (node) node.textContent = text;
+        };
+
+        try {
+            const response = await authFetch('/api/admin/stats');
+            const data = await response.json();
+            if (!data.success) throw new Error(data.message || `HTTP ${response.status}`);
+
+            const stats = data.stats;
+            const locked = stats.devicesBlockedNow > 0;
+            setText('statStudentsEnrolled', formatCount(stats.studentsEnrolled));
+            setText('statStudentsMeta', `of ${formatCount(stats.studentsTotal)} on record`);
+            setText('statBlockVerdicts', formatCount(stats.blockVerdicts));
+            setText('statBlockVerdictsMeta', `${formatCount(stats.blockVerdicts24h)} in the last 24 h`);
+            setText('statSubjects', formatCount(stats.subjects));
+            setText('statSubjectsMeta', `${formatCount(stats.gradeRecords)} grades on file`);
+            setText('statLockouts', formatCount(stats.devicesBlockedNow));
+            setText('statLockoutsMeta', locked ? `Auto-lift within ${stats.lockoutSeconds} s` : 'No devices blocked');
+
+            const icon = document.getElementById('statLockoutsIcon');
+            if (icon) {
+                icon.classList.toggle('stat-card__icon--danger', locked);
+                icon.classList.toggle('stat-card__icon--success', !locked);
+            }
+        } catch (err) {
+            console.error('[admin_dashboard] loadStats() failed:', err);
+        }
+    }
+
+    /**
+     * Wires a toolbar search box. `onSearch(text)` runs when the Search
+     * button is clicked, Enter is pressed, or the box is cleared, and -
+     * when `debounceMs` is above 0 - once typing pauses for that long.
+     * Pass 0 for a box that should only search on request, like the exact
+     * student ID lookup, where every partial ID would be a miss.
+     *
+     * @param {HTMLInputElement} input
+     * @param {HTMLButtonElement} button
+     * @param {(text: string) => void} onSearch - Receives the trimmed box text.
+     * @param {number} debounceMs
+     * @returns {void}
+     */
+    function wireSearchBox(input, button, onSearch, debounceMs) {
+        let timer = null;
+        const run = () => {
+            clearTimeout(timer);
+            onSearch(input.value.trim());
+        };
+
+        button.addEventListener('click', run);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                run();
+            }
+        });
+        input.addEventListener('input', () => {
+            clearTimeout(timer);
+            // Emptied by the box's clear (x) button, Escape, or deleting the text.
+            if (input.value === '') run();
+            else if (debounceMs > 0) timer = setTimeout(run, debounceMs);
+        });
+    }
+
+    // Student Records shows one page of a search at a time (GET
+    // /api/students is paged - see server.js). The search text and page
+    // are kept here, so reopening the section or refreshing after an
+    // edit reloads the same view instead of jumping back to page one.
+    const STUDENT_PAGE_SIZE = 100;
+    const studentView = { q: '', offset: 0, total: 0 };
+    let studentRequestSeq = 0;
+
+    /**
+     * Renders the Student Records table from a students array. Used
      * for both the initial load and every post-mutation refresh, so the
      * table can never drift from what the server actually persisted.
      *
@@ -451,7 +544,9 @@ if (!localStorage.getItem('authToken')) {
         if (!tableBody) return;
         tableBody.innerHTML = '';
         if (students.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="7" class="text-muted">No students yet - click "Add New Student" to create one.</td></tr>';
+            tableBody.innerHTML = studentView.q
+                ? `<tr><td colspan="7" class="text-muted">No students match "${escapeHtml(studentView.q)}".</td></tr>`
+                : '<tr><td colspan="7" class="text-muted">No students yet - click "Add New Student" to create one.</td></tr>';
             return;
         }
         students.forEach(student => {
@@ -471,30 +566,78 @@ if (!localStorage.getItem('authToken')) {
     }
 
     /**
-     * Fetches and renders the Student Records table. Declared at top
-     * level so the sidebar navigation handler can call it.
+     * Updates the Student Records footer: which rows are showing out of
+     * how many, and whether Previous/Next lead anywhere.
+     *
+     * @param {number} shown - Rows on the current page.
+     * @returns {void}
+     */
+    function renderStudentsPager(shown) {
+        const count = document.getElementById('studentsCount');
+        const prev = document.getElementById('btnStudentsPrev');
+        const next = document.getElementById('btnStudentsNext');
+        const { q, offset, total } = studentView;
+        const matching = q ? ` matching "${escapeHtml(q)}"` : '';
+
+        if (count) {
+            count.innerHTML = shown === 0
+                ? `<strong>0</strong> students${matching}`
+                : `Showing <strong>${formatCount(offset + 1)}&ndash;${formatCount(offset + shown)}</strong> of <strong>${formatCount(total)}</strong> ${total === 1 ? 'student' : 'students'}${matching}`;
+        }
+        if (prev) prev.disabled = offset === 0;
+        if (next) next.disabled = offset + shown >= total;
+    }
+
+    /**
+     * Fetches and renders the current page of the Student Records table
+     * (see studentView above). Declared at top level so the sidebar
+     * navigation handler can call it.
+     *
+     * While the admin types, responses can arrive out of order; each call
+     * takes a sequence number, and a response that is no longer the latest
+     * is dropped instead of overwriting newer results.
      *
      * @returns {Promise<void>}
      */
     async function loadStudents() {
         const tableBody = document.getElementById('studentsTableBody');
         if (!tableBody) return;
+        const seq = ++studentRequestSeq;
+        const params = new URLSearchParams({ limit: STUDENT_PAGE_SIZE, offset: studentView.offset });
+        if (studentView.q) params.set('q', studentView.q);
+
         try {
-            const response = await authFetch('/api/students');
+            const response = await authFetch(`/api/students?${params}`);
             const data = await response.json();
+            if (seq !== studentRequestSeq) return;
+
             if (data.success) {
+                // Removing the only row on the last page leaves that page
+                // empty; show the page before it instead.
+                if (data.students.length === 0 && studentView.offset > 0 && data.total > 0) {
+                    studentView.offset = Math.floor((data.total - 1) / STUDENT_PAGE_SIZE) * STUDENT_PAGE_SIZE;
+                    return loadStudents();
+                }
+                studentView.total = data.total;
                 renderStudentsTable(data.students);
+                renderStudentsPager(data.students.length);
             } else {
                 tableBody.innerHTML = `<tr><td colspan="7" style="color: red;">${escapeHtml(data.message || 'Could not load students.')}</td></tr>`;
             }
         } catch (err) {
+            if (seq !== studentRequestSeq) return;
             console.error('[admin_dashboard] loadStudents() failed:', err);
             tableBody.innerHTML = '<tr><td colspan="7" style="color: red;">Cannot connect to server.</td></tr>';
         }
     }
 
+    // The Subject Catalog's search text, kept for the same reason as
+    // studentView above. The catalog is small, so it is not paged.
+    const subjectView = { q: '' };
+    let subjectRequestSeq = 0;
+
     /**
-     * Renders the full Subject Catalog table from a subjects array.
+     * Renders the Subject Catalog table from a subjects array.
      * Mirrors renderStudentsTable() above.
      *
      * @param {Array<object>} subjects - Subject records to render.
@@ -505,7 +648,9 @@ if (!localStorage.getItem('authToken')) {
         if (!tableBody) return;
         tableBody.innerHTML = '';
         if (subjects.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="5" class="text-muted">No subjects yet - click "Add Subject" to create one.</td></tr>';
+            tableBody.innerHTML = subjectView.q
+                ? `<tr><td colspan="5" class="text-muted">No subjects match "${escapeHtml(subjectView.q)}".</td></tr>`
+                : '<tr><td colspan="5" class="text-muted">No subjects yet - click "Add Subject" to create one.</td></tr>';
             return;
         }
         subjects.forEach(subject => {
@@ -523,22 +668,35 @@ if (!localStorage.getItem('authToken')) {
     }
 
     /**
-     * Fetches and renders the Subject Catalog table.
+     * Fetches and renders the Subject Catalog table for the current search
+     * (see subjectView above), dropping out-of-order responses like
+     * loadStudents().
      *
      * @returns {Promise<void>}
      */
     async function loadSubjects() {
         const tableBody = document.getElementById('subjectsTableBody');
         if (!tableBody) return;
+        const seq = ++subjectRequestSeq;
+        const path = subjectView.q ? `/api/subjects?q=${encodeURIComponent(subjectView.q)}` : '/api/subjects';
+
         try {
-            const response = await authFetch('/api/subjects');
+            const response = await authFetch(path);
             const data = await response.json();
+            if (seq !== subjectRequestSeq) return;
+
             if (data.success) {
                 renderSubjectsTable(data.subjects);
+                const count = document.getElementById('subjectsCount');
+                if (count) {
+                    const n = data.subjects.length;
+                    count.innerHTML = `<strong>${formatCount(n)}</strong> ${n === 1 ? 'subject' : 'subjects'}${subjectView.q ? ` matching "${escapeHtml(subjectView.q)}"` : ' in the catalog'}`;
+                }
             } else {
                 tableBody.innerHTML = `<tr><td colspan="5" style="color: red;">${escapeHtml(data.message || 'Could not load subjects.')}</td></tr>`;
             }
         } catch (err) {
+            if (seq !== subjectRequestSeq) return;
             console.error('[admin_dashboard] loadSubjects() failed:', err);
             tableBody.innerHTML = '<tr><td colspan="5" style="color: red;">Cannot connect to server.</td></tr>';
         }
@@ -632,7 +790,9 @@ if (!localStorage.getItem('authToken')) {
 
             mainTitle.innerText = clickedLink.innerText;
 
-            if (targetSectionId === 'section-security-logs') {
+            if (targetSectionId === 'section-dashboard') {
+                loadStats();
+            } else if (targetSectionId === 'section-security-logs') {
                 fetchLogs();
             } else if (targetSectionId === 'section-admin-settings') {
                 fetchBlockedDevices();
@@ -670,16 +830,32 @@ if (!localStorage.getItem('authToken')) {
         /**
          * Sizes the canvas's pixel buffer to its rendered CSS size scaled
          * by devicePixelRatio, keeping lines and text crisp on high-DPI
-         * displays.
+         * displays. Runs at the start of every draw, so the buffer always
+         * matches the display the chart is on right now - including after
+         * the window moves to a projector with a different pixel density.
          *
-         * @returns {void}
+         * While the Dashboard section is hidden the canvas measures 0 x 0,
+         * and the buffer is left alone. Sizing it to that is what used to
+         * blank the chart: a window resize (e.g. plugging in a projector)
+         * while another section was open shrank the buffer to nothing, and
+         * nothing sized it back when the Dashboard was reopened.
+         *
+         * @returns {DOMRect|null} The canvas's on-screen size, or null while it is hidden.
          */
         function resizeCanvas() {
-            const dpr = window.devicePixelRatio || 1;
             const rect = canvas.getBoundingClientRect();
-            canvas.width = Math.round(rect.width * dpr);
-            canvas.height = Math.round(rect.height * dpr);
+            if (rect.width === 0 || rect.height === 0) return null;
+
+            const dpr = window.devicePixelRatio || 1;
+            const width = Math.round(rect.width * dpr);
+            const height = Math.round(rect.height * dpr);
+            // Assigning width/height clears the canvas even when unchanged, so only on a real change.
+            if (canvas.width !== width || canvas.height !== height) {
+                canvas.width = width;
+                canvas.height = height;
+            }
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            return rect;
         }
 
         function scoreToY(score, padding, plotH) {
@@ -687,7 +863,8 @@ if (!localStorage.getItem('authToken')) {
         }
 
         function drawChart() {
-            const rect = canvas.getBoundingClientRect();
+            const rect = resizeCanvas();
+            if (!rect) return; // Dashboard hidden: the next draw after it reopens catches up
             const width = rect.width;
             const height = rect.height;
             const padding = { top: 14, right: 14, bottom: 10, left: 34 };
@@ -770,15 +947,49 @@ if (!localStorage.getItem('authToken')) {
             }
         }
 
-        resizeCanvas();
         drawChart();
         pollScores();
         setInterval(pollScores, 1500);
-        window.addEventListener('resize', () => { resizeCanvas(); drawChart(); });
+
+        // Redraws the moment the canvas changes size for any reason: a
+        // window resize, the Dashboard being reopened (0 x 0 -> full
+        // size), or the layout reflowing at a breakpoint.
+        new ResizeObserver(drawChart).observe(canvas);
+
+        // Moving the window to a display with a different pixel density can
+        // change devicePixelRatio without changing the canvas's CSS size,
+        // which ResizeObserver does not report. A media query on the current
+        // ratio fires once when it stops matching, so each change re-arms
+        // the watch on the new ratio.
+        (function watchPixelRatio() {
+            matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+                .addEventListener('change', () => { drawChart(); watchPixelRatio(); }, { once: true });
+        })();
 
         console.log('[admin_dashboard] Live anomaly chart wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Live anomaly chart wiring FAILED:', err);
+    }
+
+    // =============================================================
+    // STAT CARDS (live database counts)
+    // =============================================================
+    // Refreshed every 5 seconds, so "Threats Blocked" and "Active
+    // Lockouts" move while a Simulate Attack burst is being mitigated -
+    // but only while the Dashboard is on screen and the tab is visible,
+    // since each refresh runs seven COUNT queries against the database.
+    try {
+        console.log('[admin_dashboard] Wiring stat cards...');
+        const dashboardSection = document.getElementById('section-dashboard');
+        if (!dashboardSection) throw new Error('#section-dashboard not found in the DOM.');
+
+        loadStats();
+        setInterval(() => {
+            if (dashboardSection.style.display !== 'none' && !document.hidden) loadStats();
+        }, 5000);
+        console.log('[admin_dashboard] Stat cards wired successfully.');
+    } catch (err) {
+        console.error('[admin_dashboard] Stat cards wiring FAILED:', err);
     }
 
     // =============================================================
@@ -790,10 +1001,6 @@ if (!localStorage.getItem('authToken')) {
         const demoStatus = document.getElementById('demoStatus');
         if (!btnSimulateAttack) throw new Error('#btnSimulateAttack not found in the DOM.');
         if (!demoStatus) throw new Error('#demoStatus not found in the DOM.');
-
-        function wait(ms) {
-            return new Promise(resolve => setTimeout(resolve, ms));
-        }
 
         /**
          * Fires one POST /api/demo/ping through the full security
@@ -822,26 +1029,28 @@ if (!localStorage.getItem('authToken')) {
             let lockedByBlock = false;
 
             try {
-                // Stage 1: a small number of spaced-out pings, so the
-                // chart first shows one isolated LOG-level flag before
-                // the spike.
-                for (let i = 0; i < 4; i++) {
-                    sendPing();
-                    await wait(120);
-                }
-
-                // Stage 2: a genuinely concurrent burst. core/profiler.js's
-                // EMA baseline (alpha=0.1) adapts toward whatever request
-                // rate it observes, so a burst spaced out over time gives
-                // it enough update cycles to "learn" the elevated pace as
-                // normal before the score can climb far. Firing every
-                // request in the same tick via Promise.all outruns that
-                // adaptation instead of feeding it, letting the score
-                // climb through MEDIUM/HIGH and cross BLOCK. The batch
-                // size (50) carries a deliberate safety margin: dispatch
-                // concurrency has measurable run-to-run variance (e.g.
-                // connection pooling, scheduler timing), and a smaller
-                // batch was observed to fall short of BLOCK on some runs.
+                // One genuinely concurrent burst, with no warm-up pings
+                // before it. core/monitor.js measures velocity from the
+                // OLDEST request in WEVA's 30-second window, so any earlier
+                // request from this device stretches the burst's time span
+                // and dilutes its rate - warm-up pings 120 ms apart, which
+                // this demo used to send first so the chart showed a LOG
+                // flag before the spike, capped the burst at a score of
+                // about 84: THROTTLE, never BLOCK, since an admin's BLOCK
+                // threshold is 100 (85 + the admin tolerance of 15 in
+                // core/decisionEngine.js). Fired back to back instead, the
+                // burst's 3rd request sees two others inside a few
+                // milliseconds - hundreds of requests per second - and
+                // scores the full 100 (see middleware/securityMiddleware.js).
+                //
+                // The same dilution applies to anything else this device
+                // did in the last 30 seconds that WEVA scores - opening
+                // Security Logs (GET /api/admin/logs) or any add/edit/
+                // remove - so give it 30 seconds after those for a
+                // guaranteed BLOCK. (This page does not fetch the logs on
+                // load for exactly this reason.) The burst size (50) is far
+                // more than BLOCK needs; the rest show the mitigation
+                // holding on the chart.
                 const pending = Array.from({ length: 50 }, () => sendPing());
                 const statuses = await Promise.all(pending);
 
@@ -870,6 +1079,9 @@ if (!localStorage.getItem('authToken')) {
                     btnSimulateAttack.disabled = false;
                     btnSimulateAttack.innerHTML = '<i class="fa-solid fa-bolt"></i> Simulate Attack';
                 }
+                // Every ping's verdict is audited before its response is
+                // sent, so the stat cards can show this burst right away.
+                loadStats();
             }
         });
 
@@ -881,14 +1093,18 @@ if (!localStorage.getItem('authToken')) {
     // =============================================================
     // SECURITY LOGS
     // =============================================================
+    // The table is fetched when the section is opened (see the sidebar
+    // handler), not on page load: GET /api/admin/logs is WEVA-scored, and a
+    // scored request at load would sit in this device's 30-second window
+    // and dilute a Simulate Attack burst made right after signing in (see
+    // the DEMO MODE block above).
     try {
-        console.log('[admin_dashboard] Wiring security logs (refresh button + initial fetch)...');
+        console.log('[admin_dashboard] Wiring security logs refresh button...');
         const btnRefreshLogs = document.getElementById('btnRefreshLogs');
         if (!btnRefreshLogs) throw new Error('#btnRefreshLogs not found in the DOM.');
 
         btnRefreshLogs.addEventListener('click', fetchLogs);
-        fetchLogs();
-        console.log('[admin_dashboard] Security logs wired successfully; initial fetchLogs() triggered.');
+        console.log('[admin_dashboard] Security logs wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Security logs wiring FAILED:', err);
     }
@@ -976,32 +1192,48 @@ if (!localStorage.getItem('authToken')) {
     }
 
     // =============================================================
-    // DATABASE BACKUP
+    // DATA EXPORT (JSON snapshot)
     // =============================================================
-    // Fetches GET /api/admin/backup (see server.js for exactly what is
-    // included and why) and triggers a browser download via a Blob and a
-    // programmatically-clicked, immediately-revoked <a download> link -
-    // the standard client-side approach for saving fetched data to a file.
+    // GET /api/admin/backup streams the snapshot (see server.js and
+    // utils/databaseExport.js for what is included and why). The body is
+    // saved exactly as received - via a Blob and a programmatically-clicked,
+    // immediately-revoked <a download> link - instead of being parsed and
+    // re-serialized, which at tens of thousands of rows would hold two full
+    // copies of the database in this tab. If the server aborts the stream
+    // partway, reading the body fails and nothing is saved: a truncated
+    // snapshot can never be downloaded as if it were complete.
     try {
-        console.log('[admin_dashboard] Wiring database backup...');
+        console.log('[admin_dashboard] Wiring data export...');
         const btnBackupDatabase = document.getElementById('btnBackupDatabase');
         if (!btnBackupDatabase) throw new Error('#btnBackupDatabase not found in the DOM.');
+        const idleHtml = btnBackupDatabase.innerHTML;
+
+        /**
+         * @param {Response} response
+         * @returns {string} The server's Content-Disposition filename, or a timestamped fallback.
+         */
+        function snapshotFilename(response) {
+            const match = /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') || '');
+            return match ? match[1] : `sis_snapshot_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+        }
 
         btnBackupDatabase.addEventListener('click', async () => {
             btnBackupDatabase.disabled = true;
-            btnBackupDatabase.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Backing up...';
-            console.log('[admin_dashboard] Backup requested - fetching /api/admin/backup...');
+            btnBackupDatabase.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Exporting...';
+            console.log('[admin_dashboard] Snapshot requested - fetching /api/admin/backup...');
 
             try {
-                const data = await submitAction('/api/admin/backup');
-
-                if (!data.success) {
-                    showResult(data);
+                const response = await authFetch('/api/admin/backup');
+                if (!response.ok) {
+                    // A WEVA 403/429 is already on the rate-limit banner
+                    // (authFetch); showResult() skips those and alerts the rest.
+                    const data = await response.json().catch(() => ({}));
+                    showResult({ ...data, _httpStatus: response.status });
                     return;
                 }
 
-                const filename = `sis_database_backup_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const blob = await response.blob();
+                const filename = snapshotFilename(response);
                 const url = URL.createObjectURL(blob);
 
                 const link = document.createElement('a');
@@ -1012,20 +1244,20 @@ if (!localStorage.getItem('authToken')) {
                 document.body.removeChild(link);
                 URL.revokeObjectURL(url);
 
-                console.log(`[admin_dashboard] Backup downloaded as ${filename}.`);
-                alert(`Backup downloaded: ${filename}`);
+                console.log(`[admin_dashboard] Snapshot downloaded as ${filename} (${blob.size} bytes).`);
+                alert(`Snapshot downloaded: ${filename}`);
             } catch (err) {
-                console.error('[admin_dashboard] Database backup failed:', err);
-                alert('Backup failed - could not reach the server. See console for details.');
+                console.error('[admin_dashboard] Snapshot export failed:', err);
+                alert('The export stopped before the snapshot was complete, so nothing was saved. Please try again.');
             } finally {
                 btnBackupDatabase.disabled = false;
-                btnBackupDatabase.innerHTML = '<i class="fa-solid fa-database"></i> Backup PostgreSQL DB';
+                btnBackupDatabase.innerHTML = idleHtml;
             }
         });
 
-        console.log('[admin_dashboard] Database backup wired successfully.');
+        console.log('[admin_dashboard] Data export wired successfully.');
     } catch (err) {
-        console.error('[admin_dashboard] Database backup wiring FAILED:', err);
+        console.error('[admin_dashboard] Data export wiring FAILED:', err);
     }
 
     // =============================================================
@@ -1047,11 +1279,40 @@ if (!localStorage.getItem('authToken')) {
         const studentProgramInput = document.getElementById('studentProgramInput');
         const studentYearLevelInput = document.getElementById('studentYearLevelInput');
         const studentStatusInput = document.getElementById('studentStatusInput');
+        const studentSearchInput = document.getElementById('studentSearchInput');
+        const btnStudentSearch = document.getElementById('btnStudentSearch');
+        const btnStudentsPrev = document.getElementById('btnStudentsPrev');
+        const btnStudentsNext = document.getElementById('btnStudentsNext');
 
         if (!studentsTableBody) throw new Error('#studentsTableBody not found in the DOM.');
         if (!btnAddStudent) throw new Error('#btnAddStudent not found in the DOM.');
         if (!studentModal) throw new Error('#studentModal not found in the DOM.');
         if (!studentForm) throw new Error('#studentForm not found in the DOM.');
+        if (!studentSearchInput || !btnStudentSearch) throw new Error('Student search box not found in the DOM.');
+        if (!btnStudentsPrev || !btnStudentsNext) throw new Error('Student pager buttons not found in the DOM.');
+
+        const studentsTableWrap = studentsTableBody.closest('.table-wrap');
+
+        /**
+         * Shows page `offset` of the students matching `q`, scrolled to its
+         * first row.
+         *
+         * @param {string} q
+         * @param {number} offset
+         * @returns {Promise<void>}
+         */
+        async function showStudents(q, offset) {
+            studentView.q = q;
+            studentView.offset = offset;
+            await loadStudents();
+            if (studentsTableWrap) studentsTableWrap.scrollTop = 0;
+        }
+
+        // GET /api/students is not scored by WEVA (only mutations are), so
+        // searching as the admin types cannot trip a THROTTLE.
+        wireSearchBox(studentSearchInput, btnStudentSearch, (text) => showStudents(text, 0), 300);
+        btnStudentsPrev.addEventListener('click', () => showStudents(studentView.q, Math.max(0, studentView.offset - STUDENT_PAGE_SIZE)));
+        btnStudentsNext.addEventListener('click', () => showStudents(studentView.q, studentView.offset + STUDENT_PAGE_SIZE));
 
         /**
          * Opens the Add/Edit Student modal. In edit mode, studentId is
@@ -1119,7 +1380,14 @@ if (!localStorage.getItem('authToken')) {
             showResult(data);
             if (data.success) {
                 studentModal.close();
-                loadStudents(); // re-fetch so the table matches the server's saved state exactly
+                if (mode === 'add') {
+                    // A new student sorts somewhere among 15,000+ others -
+                    // search for it, so the admin sees the row they just saved.
+                    studentSearchInput.value = payload.studentId;
+                    showStudents(payload.studentId, 0);
+                } else {
+                    loadStudents(); // re-fetch so the table matches the server's saved state exactly
+                }
             }
         });
 
@@ -1148,7 +1416,7 @@ if (!localStorage.getItem('authToken')) {
 
                 const data = await submitAction(`/api/students/${encodeURIComponent(id)}`, { method: 'DELETE' });
                 showResult(data);
-                if (data.success) row.remove();
+                if (data.success) loadStudents(); // keeps the page full and the "of N" count right
             }
         });
         console.log('[admin_dashboard] Student Records wired successfully.');
@@ -1173,11 +1441,19 @@ if (!localStorage.getItem('authToken')) {
         const subjectTitleInput = document.getElementById('subjectTitleInput');
         const subjectUnitsInput = document.getElementById('subjectUnitsInput');
         const subjectDepartmentInput = document.getElementById('subjectDepartmentInput');
+        const subjectSearchInput = document.getElementById('subjectSearchInput');
+        const btnSubjectSearch = document.getElementById('btnSubjectSearch');
 
         if (!subjectsTableBody) throw new Error('#subjectsTableBody not found in the DOM.');
         if (!btnAddSubject) throw new Error('#btnAddSubject not found in the DOM.');
         if (!subjectModal) throw new Error('#subjectModal not found in the DOM.');
         if (!subjectForm) throw new Error('#subjectForm not found in the DOM.');
+        if (!subjectSearchInput || !btnSubjectSearch) throw new Error('Subject search box not found in the DOM.');
+
+        wireSearchBox(subjectSearchInput, btnSubjectSearch, (text) => {
+            subjectView.q = text;
+            loadSubjects();
+        }, 300);
 
         function openSubjectModal(mode, subject) {
             subjectForm.reset();
@@ -1232,6 +1508,11 @@ if (!localStorage.getItem('authToken')) {
             showResult(data);
             if (data.success) {
                 subjectModal.close();
+                if (mode === 'add') {
+                    // Same as Add Student: make sure the current search shows the new row.
+                    subjectSearchInput.value = payload.subjectCode;
+                    subjectView.q = payload.subjectCode;
+                }
                 loadSubjects();
             }
         });
@@ -1257,12 +1538,188 @@ if (!localStorage.getItem('authToken')) {
 
                 const data = await submitAction(`/api/subjects/${encodeURIComponent(id)}`, { method: 'DELETE' });
                 showResult(data);
-                if (data.success) row.remove();
+                if (data.success) loadSubjects(); // keeps the count right
             }
         });
         console.log('[admin_dashboard] Subject Management wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Subject Management wiring FAILED:', err);
+    }
+
+    // =============================================================
+    // GRADE MANAGEMENT (grade report lookup by student ID)
+    // =============================================================
+    // Reads GET /api/students/:id/grades (server.js), which returns the
+    // student, their decrypted grades, and the same units/GWA/standing
+    // summary the student sees on their own dashboard.
+    try {
+        console.log('[admin_dashboard] Wiring Grade Management lookup...');
+        const gradeSearchInput = document.getElementById('gradeSearchInput');
+        const btnGradeSearch = document.getElementById('btnGradeSearch');
+        const gradeEmptyState = document.getElementById('gradeEmptyState');
+        const gradeEmptyTitle = document.getElementById('gradeEmptyTitle');
+        const gradeEmptyText = document.getElementById('gradeEmptyText');
+        const gradeReport = document.getElementById('gradeReport');
+        const gradesTableBody = document.getElementById('gradesTableBody');
+
+        if (!gradeSearchInput || !btnGradeSearch) throw new Error('Grade lookup box not found in the DOM.');
+        if (!gradeEmptyState || !gradeEmptyTitle || !gradeEmptyText) throw new Error('#gradeEmptyState not found in the DOM.');
+        if (!gradeReport || !gradesTableBody) throw new Error('#gradeReport not found in the DOM.');
+
+        let lookupSeq = 0;
+
+        /**
+         * Swaps the report out for the empty-state card, with a message.
+         *
+         * @param {string} title
+         * @param {string} text
+         * @returns {void}
+         */
+        function showGradeMessage(title, text) {
+            gradeReport.hidden = true;
+            gradeEmptyTitle.textContent = title;
+            gradeEmptyText.textContent = text;
+            gradeEmptyState.hidden = false;
+        }
+
+        /**
+         * @param {string} remarks - e.g. "Passed" or "Failed".
+         * @returns {string} Badge class for the remarks.
+         */
+        function remarksBadgeClass(remarks) {
+            if (/fail/i.test(remarks)) return 'bg-danger';
+            if (/pass/i.test(remarks)) return 'bg-success';
+            return 'bg-info';
+        }
+
+        /**
+         * Renders a GET /api/students/:id/grades response.
+         *
+         * @param {{student: object, grades: Array<object>, stats: {enrolledUnits: number, gwa: number|null, academicStanding: string}}} report
+         * @returns {void}
+         */
+        function renderGradeReport({ student, grades, stats }) {
+            document.getElementById('gradeStudentName').innerHTML =
+                `${escapeHtml(student.fullName)} <span class="badge ${studentBadgeClass(student.status)}">${escapeHtml(student.status)}</span>`;
+            document.getElementById('gradeStudentMeta').textContent =
+                [student.studentId, student.program, student.yearLevel, student.department].filter(Boolean).join(' · ');
+
+            document.getElementById('gradeGwa').textContent = stats.gwa == null ? '—' : stats.gwa.toFixed(2);
+            document.getElementById('gradeUnits').textContent = String(stats.enrolledUnits);
+            const standingClass = stats.academicStanding === 'Good Standing' ? 'bg-success'
+                : stats.academicStanding === 'On Probation' ? 'bg-warning' : 'bg-info';
+            document.getElementById('gradeStanding').innerHTML =
+                `<span class="badge ${standingClass}">${escapeHtml(stats.academicStanding)}</span>`;
+
+            gradesTableBody.innerHTML = grades.length === 0
+                ? '<tr><td colspan="6" class="text-muted">No grades recorded for this student yet.</td></tr>'
+                : grades.map(g => `
+                    <tr>
+                        <td><strong>${escapeHtml(g.subjectCode)}</strong></td>
+                        <td>${escapeHtml(g.subjectTitle)}</td>
+                        <td class="col-center">${escapeHtml(String(g.units))}</td>
+                        <td>${escapeHtml(g.term || '')}</td>
+                        <td class="col-num"><strong>${g.grade == null ? '—' : g.grade.toFixed(2)}</strong></td>
+                        <td>${g.remarks ? `<span class="badge ${remarksBadgeClass(g.remarks)}">${escapeHtml(g.remarks)}</span>` : ''}</td>
+                    </tr>`).join('');
+
+            gradeEmptyState.hidden = true;
+            gradeReport.hidden = false;
+        }
+
+        /**
+         * Looks up one student's grade report. An empty ID resets the
+         * section to its "No student selected" state.
+         *
+         * @param {string} studentId
+         * @returns {Promise<void>}
+         */
+        async function lookUpGrades(studentId) {
+            const seq = ++lookupSeq;
+            if (!studentId) {
+                showGradeMessage('No student selected', 'Enter a student ID to view their grade report.');
+                return;
+            }
+
+            showGradeMessage('Searching...', `Looking up ${studentId}.`);
+            try {
+                const response = await authFetch(`/api/students/${encodeURIComponent(studentId)}/grades`);
+                const data = await response.json();
+                if (seq !== lookupSeq) return;
+
+                if (data.success) {
+                    renderGradeReport(data);
+                } else {
+                    showGradeMessage(response.status === 404 ? 'Student not found' : 'Could not load grades',
+                        data.message || 'Something went wrong.');
+                }
+            } catch (err) {
+                if (seq !== lookupSeq) return;
+                console.error('[admin_dashboard] Grade lookup failed:', err);
+                showGradeMessage('Could not load grades', 'Cannot connect to server.');
+            }
+        }
+
+        // Exact-ID lookup, so it only runs on Search/Enter (debounce 0).
+        wireSearchBox(gradeSearchInput, btnGradeSearch, lookUpGrades, 0);
+        console.log('[admin_dashboard] Grade Management lookup wired successfully.');
+    } catch (err) {
+        console.error('[admin_dashboard] Grade Management lookup wiring FAILED:', err);
+    }
+
+    // =============================================================
+    // PAYMENT RECORDS (search)
+    // =============================================================
+    // The payment rows are static sample markup in admin_dashboard.html -
+    // there is no Payment model or payments API yet - so this search
+    // filters those rows in place rather than querying the server.
+    try {
+        console.log('[admin_dashboard] Wiring Payment Records search...');
+        const paymentSearchInput = document.getElementById('paymentSearchInput');
+        const btnPaymentSearch = document.getElementById('btnPaymentSearch');
+        const paymentsTableBody = document.getElementById('paymentsTableBody');
+        const paymentsCount = document.getElementById('paymentsCount');
+
+        if (!paymentSearchInput || !btnPaymentSearch) throw new Error('Payment search box not found in the DOM.');
+        if (!paymentsTableBody) throw new Error('#paymentsTableBody not found in the DOM.');
+
+        const paymentRows = [...paymentsTableBody.querySelectorAll('tr')];
+        const noMatchRow = document.createElement('tr');
+        noMatchRow.innerHTML = '<td colspan="5" class="text-muted"></td>';
+
+        /**
+         * Shows only the payment rows whose student ID or OR number
+         * contains `text` (case-insensitive).
+         *
+         * @param {string} text
+         * @returns {void}
+         */
+        function filterPayments(text) {
+            const needle = text.toLowerCase();
+            let shown = 0;
+            paymentRows.forEach(row => {
+                const [studentIdCell, orNumberCell] = row.children;
+                const match = !needle || `${studentIdCell.textContent}\n${orNumberCell.textContent}`.toLowerCase().includes(needle);
+                row.hidden = !match;
+                if (match) shown++;
+            });
+
+            if (shown === 0) {
+                noMatchRow.firstElementChild.textContent = `No payments match "${text}".`;
+                paymentsTableBody.appendChild(noMatchRow);
+            } else {
+                noMatchRow.remove();
+            }
+            if (paymentsCount) {
+                paymentsCount.innerHTML = `<strong>${formatCount(shown)}</strong> ${shown === 1 ? 'payment' : 'payments'}${needle ? ` matching "${escapeHtml(text)}"` : ' on record'}`;
+            }
+        }
+
+        wireSearchBox(paymentSearchInput, btnPaymentSearch, filterPayments, 150);
+        filterPayments('');
+        console.log('[admin_dashboard] Payment Records search wired successfully.');
+    } catch (err) {
+        console.error('[admin_dashboard] Payment Records search wiring FAILED:', err);
     }
 
     // =============================================================

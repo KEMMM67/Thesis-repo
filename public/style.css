@@ -195,8 +195,8 @@ body {
 }
 .signup-text a:hover { text-decoration: underline; }
 
-/* Test Accounts Section */
-.test-accounts-section {
+/* Authorized-use notice under the login forms (and on signup.html) */
+.login-notice {
     background-color: var(--color-bg);
     border: 1px solid var(--color-border);
     padding: 16px 18px;
@@ -206,8 +206,9 @@ body {
     color: var(--color-text-secondary);
     line-height: 1.7;
 }
+.login-notice p { margin: 0; }
 
-.test-accounts-section .test-title {
+.login-notice .login-notice__title {
     font-weight: 700;
     color: var(--color-text);
     margin: 0 0 6px;
@@ -667,6 +668,43 @@ tbody tr:last-child td { border-bottom: none; }
 .bg-warning { background-color: var(--color-warning-bg); color: var(--color-warning); border-color: var(--color-warning-border); }
 .bg-danger { background-color: var(--color-danger-bg); color: var(--color-danger); border-color: var(--color-danger-border); }
 .bg-info { background-color: #e8f1fc; color: #1f6fc4; border-color: #c5ddf6; }
+
+/* ---- Scope markers: modules shown as a preview, not live records ----
+   Used by both dashboards so a sample-data section can never be mistaken
+   for real data during a demo (Payment Records, the student's Schedule /
+   Billing / Clearance) and a planned feature reads as planned. */
+.scope-tag {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 8px;
+    border: 1px solid #c5ddf6;
+    border-radius: 999px;
+    background-color: #e8f1fc;
+    color: #1f6fc4;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1.5;
+    text-transform: uppercase;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.btn-primary .scope-tag,
+.btn-secondary .scope-tag { margin-left: 0; }
+.sample-notice {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 16px;
+    padding: 10px 14px;
+    border: 1px solid #c5ddf6;
+    border-radius: var(--radius-sm);
+    background-color: #f4f8fe;
+    color: #1f4f8a;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.sample-notice i { color: #1f6fc4; }
 
 /* ---- Buttons ---- */
 .btn-primary {
@@ -1210,6 +1248,7 @@ dialog.app-modal::backdrop {
     color: var(--console-text-soft);
 }
 .panel__hint i { color: #1f6fc4; }
+.panel__body .panel__hint { margin-top: 14px; }
 .panel__status { flex-basis: 100%; margin: 0; font-size: 13px; color: var(--console-text); }
 .panel__status:empty { display: none; }
 .panel__count { flex: 1 1 auto; margin: 0; font-size: 13px; color: var(--console-text-soft); }

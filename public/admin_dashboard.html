@@ -265,8 +265,8 @@
                     <div class="panel">
                         <div class="panel__header">
                             <div>
-                                <h2 class="panel__title">All Student Payments</h2>
-                                <p class="panel__subtitle">Recorded tuition payments and their official receipt numbers.</p>
+                                <h2 class="panel__title">All Student Payments <span class="scope-tag">Sample data</span></h2>
+                                <p class="panel__subtitle">Preview only: payment processing is outside this system's current scope, so the rows below are sample records, not live data.</p>
                             </div>
                         </div>
                         <div class="panel__toolbar">
@@ -296,7 +296,7 @@
                 <section class="section-container" id="section-security-logs">
                     <div class="print-letterhead">
                         <h1>Student Information System &mdash; Security Audit Report</h1>
-                        <p>WEVA Behavioral Security Engine (Web Endpoint Velocity &amp; Anomaly) &middot; Generated <span id="reportTimestamp"></span></p>
+                        <p>WEVA (Weighted Endpoint &amp; Velocity Algorithm) Behavioral Security Framework &middot; Generated <span id="reportTimestamp"></span></p>
                     </div>
                     <div class="panel">
                         <div class="panel__header">
@@ -334,22 +334,22 @@
                             <div class="panel__body">
                                 <div class="btn-row">
                                     <button class="btn-primary" id="btnCreateAdmin"><i class="fa-solid fa-user-plus"></i> Create New Admin Account</button>
-                                    <button class="btn-secondary"><i class="fa-solid fa-key"></i> Manage System Access</button>
+                                    <button type="button" class="btn-secondary" disabled title="Planned: fine-grained roles and permissions"><i class="fa-solid fa-key"></i> Manage System Access <span class="scope-tag">Planned</span></button>
                                 </div>
                             </div>
                         </div>
                         <div class="panel">
                             <div class="panel__header">
                                 <div>
-                                    <h2 class="panel__title">Database Backup</h2>
-                                    <p class="panel__subtitle">Export a PostgreSQL backup, or restore from one.</p>
+                                    <h2 class="panel__title">Data Export &amp; Backup</h2>
+                                    <p class="panel__subtitle">Download a consistent JSON snapshot of every table. Grades stay AES-256-GCM encrypted inside the file; password hashes, OTP codes and session tokens are never exported.</p>
                                 </div>
                             </div>
                             <div class="panel__body">
                                 <div class="btn-row">
-                                    <button class="btn-primary" id="btnBackupDatabase"><i class="fa-solid fa-database"></i> Backup PostgreSQL DB</button>
-                                    <button class="btn-secondary"><i class="fa-solid fa-rotate-left"></i> Restore DB from Backup</button>
+                                    <button class="btn-primary" id="btnBackupDatabase"><i class="fa-solid fa-file-export"></i> Export JSON Snapshot</button>
                                 </div>
+                                <p class="panel__hint"><i class="fa-solid fa-circle-info"></i> Engine-level backups and restores run on AWS RDS (automated snapshots with point-in-time recovery), not from this console: a restore overwrites live data, so it is deliberately not a web action.</p>
                             </div>
                         </div>
                     </div>
