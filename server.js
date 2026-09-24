@@ -24,18 +24,29 @@ const PORT = process.env.PORT || 3000;
 // (middleware/ipWhitelistMiddleware.js), and the login-attempt audit trail
 // onto one shared "IP" for every user.
 //
-// This trusts private-network addresses (10.x, 172.16-31.x, 192.168.x, fc00::/7,
-// plus loopback and link-local), not a hop count. A hop count of 1 was tried
-// first and was wrong: Render's logs then showed IP 10.26.132.94 - an internal
-// Render hop - so Render adds more private hops than one, and the number is
-// not something this app controls. Walking right to left past private
-// addresses and stopping at the first public one lands on the client address
-// Render's edge recorded, however many internal hops follow it. It also stays
-// spoof-proof, unlike `true`: Render appends to X-Forwarded-For rather than
-// resetting it, so anything a client writes into the header sits to the left
-// of that first public address and is never reached. Harmless locally: a
-// direct connection sends no X-Forwarded-For, so req.ip is the loopback client.
-app.set('trust proxy', 'loopback, linklocal, uniquelocal');
+// On Render a request passes through Cloudflare, then Render's load balancer,
+// then an internal proxy, and arrives with a header shaped like:
+//
+//   X-Forwarded-For: 81.97.145.24, 172.71.195.123, 10.226.90.65
+//                    client        Cloudflare edge  Render internal
+//
+// with the socket itself coming from that internal proxy. Trusting 3 hops
+// walks back past the socket, 10.226.90.65 and 172.71.195.123 and stops on the
+// client. Both earlier values were wrong, and each failure showed up in the
+// logs: trusting 1 hop gave the Render-internal address (10.26.132.94) for
+// everyone; trusting private ranges stopped on the Cloudflare edge address,
+// which changes from request to request, so WEVA's IP layer never saw a bot's
+// attempts land on one "IP" and a rotating-device bot got 15 password checks
+// before its first throttle instead of 4.
+//
+// Spoof-proof, unlike `true`: Cloudflare and Render append to
+// X-Forwarded-For rather than resetting it, so anything a client writes into
+// the header sits to the LEFT of the entry Cloudflare recorded and is never
+// reached. If Render ever adds or removes a hop, this number must follow -
+// check that the [SECURITY] log's IP matches https://api.ipify.org. Harmless
+// locally: a direct connection sends no X-Forwarded-For, so req.ip is the
+// loopback client.
+app.set('trust proxy', 3);
 
 if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET is not set. Add it to your .env file before starting the server.");

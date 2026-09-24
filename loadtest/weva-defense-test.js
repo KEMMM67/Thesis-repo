@@ -70,6 +70,8 @@ const blocked = new Counter('weva_block_403');
 const unexpected = new Counter('unexpected_responses');
 const wevaRejectLatency = new Trend('weva_reject_latency_ms', true);
 const passwordCheckLatency = new Trend('password_check_latency_ms', true);
+const legitNetworkErrors = new Counter('legit_network_errors');
+const attackNetworkErrors = new Counter('attack_network_errors');
 
 const bots = {
   paced: botMetrics('paced'),
@@ -175,6 +177,12 @@ export function legitUser(data) {
     tags: { traffic: 'legit' },
   });
 
+  if (neverReachedServer(res)) {
+    legitNetworkErrors.add(1);
+    sleep(3 + Math.random() * 2);
+    return;
+  }
+
   const tags = { phase: phaseAt(Date.now() - data.t0) };
   const body = parseBody(res);
   const ok = res.status === 200 && body !== null && body.success === true;
@@ -205,13 +213,20 @@ export function pacedBot(data) {
 // A brand-new x-device-id on every guess: the device layer never sees history,
 // so only the IP layer can stop it.
 export function rotatingBot(data) {
-  sequentialAttack(data, 'rotating', function (state) { return `${state.deviceId}-${state.attempts}`; });
+  sequentialAttack(data, 'rotating', function (state, attempt) { return `${state.deviceId}-${attempt}`; });
 }
 
 function sequentialAttack(data, kind, deviceIdFor) {
   const state = botState(kind, data);
-  state.attempts += 1;
-  const outcome = tally(http.post(`${BASE_URL}/api/login`, loginBody(), attackParams(deviceIdFor(state), kind)));
+  const attempt = state.attempts + 1;
+  const outcome = tally(http.post(`${BASE_URL}/api/login`, loginBody(), attackParams(deviceIdFor(state, attempt), kind)));
+  // WEVA never saw an attempt that never reached the server, so it doesn't
+  // advance the attempt count the escalation ladder is measured against.
+  if (outcome === 'network') {
+    sleep(ATTACK_SLEEP);
+    return;
+  }
+  state.attempts = attempt;
   const metrics = bots[kind];
 
   if (outcome === 'password_check') {
@@ -258,6 +273,11 @@ function attackParams(deviceId, kind) {
 // Attributes a response by WEVA's own bodies (core/mitigation.js), not status code
 // alone, so a 403/429 from the hosting edge is never credited to WEVA.
 function tally(res) {
+  if (neverReachedServer(res)) {
+    attackNetworkErrors.add(1);
+    return 'network';
+  }
+
   const body = parseBody(res);
   const message = body && typeof body.message === 'string' ? body.message : '';
   let outcome = 'unexpected';
@@ -340,6 +360,7 @@ function buildReport(data) {
     `  Success rate                ${['baseline', 'attack', 'recovery'].map(function (p) { return col(pct(get(`legit_success{phase:${p}}`, 'rate'))); }).join('')}`,
     `  p95 latency                 ${['baseline', 'attack', 'recovery'].map(function (p) { return col(ms(get(`legit_latency_ms{phase:${p}}`, 'p(95)'))); }).join('')}`,
     '',
+    `Never reached the server (client network errors, excluded above): ${count('legit_network_errors')} legit, ${count('attack_network_errors')} attack`,
     `Unexpected / non-WEVA responses: ${count('unexpected_responses')}`,
     '',
     'THRESHOLDS'
@@ -363,6 +384,14 @@ function predictedAttempt(threshold) {
     if (FLOOR_SCORE * (1 + FAIL_RATE_STEP * (n - 1)) >= threshold) return n;
   }
   return 100;
+}
+
+// k6 error codes 1100-1399 are DNS, TCP and TLS failures (a Windows "connectex"
+// connect timeout is 1213): the request never reached the app, so it says nothing
+// about the app or WEVA. A request that connected and then timed out (1050) still
+// counts as a failure.
+function neverReachedServer(res) {
+  return res.status === 0 && res.error_code >= 1100 && res.error_code < 1400;
 }
 
 function parseBody(res) {
