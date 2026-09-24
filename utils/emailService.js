@@ -38,16 +38,67 @@ import nodemailer from "nodemailer";
  * does not itself open a connection or validate credentials; both happen
  * lazily on the first sendMail() call, so a bad SMTP_APP_PASSWORD surfaces
  * as a caught error in sendLoginAlert() below, not at server startup.
+ *
+ * The explicit timeouts matter on hosts that silently drop SMTP traffic -
+ * Render's free web services block outbound ports 25/465/587. Nodemailer's
+ * defaults would hold an admin's login request open for up to 2 minutes
+ * waiting on a connection that can never succeed, until a proxy in front
+ * of the app cut it off; with these, it fails in ~10 s and the admin gets
+ * a real "could not send verification code" error instead.
  */
 const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
     port: 465,
     secure: true,
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
     auth: {
         user: process.env.SMTP_EMAIL,
         pass: process.env.SMTP_APP_PASSWORD
     }
 });
+
+const RESEND_ENDPOINT = "https://api.resend.com/emails";
+
+/**
+ * @returns {boolean} Whether any delivery channel is configured: Resend's
+ *          HTTPS API (RESEND_API_KEY) or Gmail SMTP (SMTP_EMAIL + SMTP_APP_PASSWORD).
+ */
+function hasMailConfig() {
+    return Boolean(process.env.RESEND_API_KEY || (process.env.SMTP_EMAIL && process.env.SMTP_APP_PASSWORD));
+}
+
+/**
+ * Sends one email, over Resend's HTTPS API when RESEND_API_KEY is set,
+ * otherwise over Gmail SMTP. HTTPS goes out on port 443, which hosts that
+ * block SMTP (Render's free tier, above) still allow. Without a verified
+ * domain, Resend only delivers from onboarding@resend.dev to the address
+ * the Resend account was created with - enough for an admin's own OTP.
+ * Throws on failure; the exported senders below catch.
+ *
+ * @param {{to: string, subject: string, html: string}} message
+ * @returns {Promise<void>}
+ */
+async function deliver({ to, subject, html }) {
+    if (process.env.RESEND_API_KEY) {
+        const response = await fetch(RESEND_ENDPOINT, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ from: process.env.RESEND_FROM || "SIS Security <onboarding@resend.dev>", to, subject, html }),
+            signal: AbortSignal.timeout(10_000)
+        });
+        if (!response.ok) {
+            throw new Error(`Resend responded ${response.status}: ${await response.text()}`);
+        }
+        return;
+    }
+
+    await transporter.sendMail({ from: `"SIS Security" <${process.env.SMTP_EMAIL}>`, to, subject, html });
+}
 
 /**
  * Builds the HTML body of a new-login security alert. Styles are inlined
@@ -114,16 +165,15 @@ function buildLoginAlertHtml(userEmail, ipAddress, timestamp) {
  * @returns {Promise<void>}
  */
 export async function sendLoginAlert(userEmail, ipAddress) {
-    if (!process.env.SMTP_EMAIL || !process.env.SMTP_APP_PASSWORD) {
-        console.warn("[emailService] SMTP_EMAIL/SMTP_APP_PASSWORD not configured - skipping login alert.");
+    if (!hasMailConfig()) {
+        console.warn("[emailService] No mail delivery configured (RESEND_API_KEY or SMTP_EMAIL/SMTP_APP_PASSWORD) - skipping login alert.");
         return;
     }
 
     try {
         const timestamp = new Date().toLocaleString("en-PH", { dateStyle: "full", timeStyle: "long" });
 
-        await transporter.sendMail({
-            from: `"SIS Security" <${process.env.SMTP_EMAIL}>`,
+        await deliver({
             to: userEmail,
             subject: "New Sign-In to Your SIS Account",
             html: buildLoginAlertHtml(userEmail, ipAddress, timestamp)
@@ -194,14 +244,13 @@ function buildOtpEmailHtml(otpCode, ttlMinutes) {
  * @returns {Promise<boolean>} `true` if the email was handed off to the SMTP server successfully, `false` otherwise. Never rejects.
  */
 export async function sendOtpEmail(userEmail, otpCode, ttlMinutes = 5) {
-    if (!process.env.SMTP_EMAIL || !process.env.SMTP_APP_PASSWORD) {
-        console.warn("[emailService] SMTP_EMAIL/SMTP_APP_PASSWORD not configured - cannot send OTP.");
+    if (!hasMailConfig()) {
+        console.warn("[emailService] No mail delivery configured (RESEND_API_KEY or SMTP_EMAIL/SMTP_APP_PASSWORD) - cannot send OTP.");
         return false;
     }
 
     try {
-        await transporter.sendMail({
-            from: `"SIS Security" <${process.env.SMTP_EMAIL}>`,
+        await deliver({
             to: userEmail,
             subject: "Your SIS Admin Verification Code",
             html: buildOtpEmailHtml(otpCode, ttlMinutes)

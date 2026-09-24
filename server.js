@@ -15,21 +15,27 @@ import { createWeva } from "./core/weva.js";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Trusts exactly one hop of X-Forwarded-For (Render's own edge proxy, which
-// terminates TLS and forwards every request to this process over its
-// internal network - see the HTTPS setup notes below). Without this,
-// Express's req.ip resolves to that proxy's own address for every request
-// once deployed, not the real client - collapsing WEVA's per-device/IP
-// behavioral profiling (core/monitor.js), the campus-intranet IP whitelist
-// (middleware/ipWhitelistMiddleware.js), and controllers/authController.js's
-// login-attempt logging onto one identical "IP" for every user. Set to 1
-// (not `true`, which would trust the whole X-Forwarded-For chain -
-// spoofable by the client) because Render sits exactly one proxy hop in
-// front of this app; a different number of hops in a future deployment
-// topology would need this value updated to match. Harmless locally: a
-// direct, non-proxied connection never sends X-Forwarded-For, so req.ip
-// still resolves to the real local client either way.
-app.set('trust proxy', 1);
+// Which X-Forwarded-For entries to believe when resolving req.ip. Render's
+// edge terminates TLS and forwards each request to this process through its
+// own private network, and every proxy on the way appends the address it
+// received the request from. Without trusting those proxies, req.ip would be
+// a Render proxy's address for every request - collapsing WEVA's per-IP
+// scoring (core/ipAttempts.js), the campus-intranet IP whitelist
+// (middleware/ipWhitelistMiddleware.js), and the login-attempt audit trail
+// onto one shared "IP" for every user.
+//
+// This trusts private-network addresses (10.x, 172.16-31.x, 192.168.x, fc00::/7,
+// plus loopback and link-local), not a hop count. A hop count of 1 was tried
+// first and was wrong: Render's logs then showed IP 10.26.132.94 - an internal
+// Render hop - so Render adds more private hops than one, and the number is
+// not something this app controls. Walking right to left past private
+// addresses and stopping at the first public one lands on the client address
+// Render's edge recorded, however many internal hops follow it. It also stays
+// spoof-proof, unlike `true`: Render appends to X-Forwarded-For rather than
+// resetting it, so anything a client writes into the header sits to the left
+// of that first public address and is never reached. Harmless locally: a
+// direct connection sends no X-Forwarded-For, so req.ip is the loopback client.
+app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 
 if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET is not set. Add it to your .env file before starting the server.");

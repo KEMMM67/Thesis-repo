@@ -101,6 +101,24 @@ async function getDeviceFingerprint() {
 }
 
 /**
+ * Reads a response body as JSON, or returns null when it isn't JSON - e.g.
+ * an HTML error page from the hosting platform after an upstream timeout.
+ * Callers report that as a server-side problem with its HTTP status, rather
+ * than letting the parse error fall into the catch block's "Cannot establish
+ * connection" message, which is reserved for requests that never got a reply.
+ *
+ * @param {Response} response
+ * @returns {Promise<object|null>}
+ */
+async function readJson(response) {
+    try {
+        return await response.json();
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Displays a status message in the given message box, built from DOM nodes
  * (not innerHTML) so the optional calmer `subtext` line can sit under the
  * primary message without any string-concatenation injection risk.
@@ -289,7 +307,12 @@ loginForm.addEventListener('submit', async function (event) {
             body: JSON.stringify({ email: emailValue, password: passwordValue })
         });
 
-        const data = await response.json();
+        const data = await readJson(response);
+        if (!data) {
+            showMessage(loginMessage, `The server returned an unexpected response (HTTP ${response.status}). Please try again in a moment.`, "error");
+            setLoading(loginBtn, false, null, LOGIN_IDLE_LABEL);
+            return;
+        }
 
         if (response.ok) {
             if (data.requireOtp) {
@@ -375,7 +398,12 @@ otpForm.addEventListener('submit', async function (event) {
             body: JSON.stringify({ email: pendingOtpEmail, otp: otpValue })
         });
 
-        const data = await response.json();
+        const data = await readJson(response);
+        if (!data) {
+            showMessage(otpMessage, `The server returned an unexpected response (HTTP ${response.status}). Please try again in a moment.`, "error");
+            setLoading(verifyBtn, false, null, VERIFY_IDLE_LABEL);
+            return;
+        }
 
         if (response.ok && data.token) {
             localStorage.setItem('authToken', data.token);
@@ -441,7 +469,12 @@ resendOtpBtn.addEventListener('click', async () => {
             body: JSON.stringify({ email: pendingOtpEmail, password: pendingOtpPassword })
         });
 
-        const data = await response.json();
+        const data = await readJson(response);
+        if (!data) {
+            setLoading(resendOtpBtn, false, null, RESEND_IDLE_LABEL);
+            showMessage(otpMessage, `The server returned an unexpected response (HTTP ${response.status}). Please try again in a moment.`, "error");
+            return;
+        }
 
         if (response.ok && data.requireOtp) {
             setLoading(resendOtpBtn, false, null, RESEND_IDLE_LABEL);
