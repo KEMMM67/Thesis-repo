@@ -1,5 +1,3 @@
-import { normalizeIp } from "./ipWhitelistMiddleware.js";
-
 /**
  * @fileoverview The identities WEVA can attach to a request, derived in
  * exactly one place so middleware/securityMiddleware.js (which scores and
@@ -46,6 +44,23 @@ const DEVICE_ID_PATTERN = /^[A-Za-z0-9_-]{1,45}$/;
  */
 const ACCOUNT_KEY_PREFIX = "user:";
 const ACCOUNT_KEY_PATTERN = /^user:(\d+)$/;
+
+/**
+ * Strips Node's IPv4-mapped IPv6 prefix, so "::ffff:127.0.0.1" and
+ * "127.0.0.1" compare equal. Express's req.ip commonly reports a plain IPv4
+ * loopback connection in the mapped form on a dual-stack listener, so
+ * without this the campus whitelist's ALLOWED_ADMIN_IPS=127.0.0.1 could
+ * fail to match the developer's own machine, and WEVA's IP layer would
+ * count one client under two keys. Shared by both
+ * (middleware/ipWhitelistMiddleware.js, getClientIdentity() below).
+ *
+ * @param {string} ip
+ * @returns {string}
+ */
+export function normalizeIp(ip) {
+    if (!ip) return ip;
+    return ip.startsWith('::ffff:') ? ip.slice(7) : ip;
+}
 
 /**
  * @param {import("express").Request} req
@@ -110,4 +125,25 @@ export function normalizeAccount(email) {
  */
 export function readTargetAccount(req) {
     return normalizeAccount(req.body?.email);
+}
+
+/**
+ * Which login page a POST /api/login comes from, as the page declares it in
+ * the request body: "admin" from the Admin Portal (public/admin_login.js),
+ * and "student" for anything else - including no value at all, which is
+ * what the Student Portal (public/script.js) sends.
+ *
+ * Declaring a portal grants nothing; it narrows what can succeed.
+ * controllers/authController.js#login accepts administrators only on the
+ * Admin Portal and everyone else only on the Student Portal, failing the
+ * wrong combination exactly like a wrong password; and
+ * middleware/ipWhitelistMiddleware.js#createIpWhitelistForAdminLogin
+ * refuses the Admin Portal from outside the campus network whatever email
+ * is typed. Read in this one place so the two can never disagree.
+ *
+ * @param {import("express").Request} req
+ * @returns {"admin"|"student"}
+ */
+export function readLoginPortal(req) {
+    return req.body?.portal === "admin" ? "admin" : "student";
 }

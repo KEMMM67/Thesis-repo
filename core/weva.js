@@ -67,7 +67,7 @@ export function createWeva(config) {
 
     const security = createSecurityMiddleware(config);
     const whitelist = createIpWhitelistMiddleware({ auditSink, ipTrackingStore });
-    const whitelistForAdminLogin = createIpWhitelistForAdminLogin({ auditSink, ipTrackingStore, identityResolver });
+    const whitelistForAdminLogin = createIpWhitelistForAdminLogin({ auditSink, ipTrackingStore });
     const routes = createAuthRoutes({
         securityMiddleware: security,
         ipWhitelistMiddleware: whitelist,

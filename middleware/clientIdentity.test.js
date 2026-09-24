@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readDeviceId, getClientIdentity, accountKey, parseAccountKey, normalizeAccount, readTargetAccount } from './clientIdentity.js';
+import { readDeviceId, getClientIdentity, accountKey, parseAccountKey, normalizeAccount, readTargetAccount, readLoginPortal, normalizeIp } from './clientIdentity.js';
 
 const withHeader = (value, ip = '203.0.113.20') => ({ headers: { 'x-device-id': value }, ip });
 
@@ -58,5 +58,24 @@ describe('account identities', () => {
         expect(readTargetAccount({ body: { email: 'Alice@X.edu.ph' } })).toBe('alice@x.edu.ph');
         expect(readTargetAccount({ body: { email: { not: '' } } })).toBe('');
         expect(readTargetAccount({})).toBe('');
+    });
+});
+
+describe('readLoginPortal', () => {
+    it('is the Admin Portal only when the request says so; anything else is the Student Portal', () => {
+        expect(readLoginPortal({ body: { portal: 'admin' } })).toBe('admin');
+        expect(readLoginPortal({ body: { portal: 'student' } })).toBe('student');
+        expect(readLoginPortal({ body: {} })).toBe('student');
+        expect(readLoginPortal({ body: { portal: ['admin'] } })).toBe('student');
+        expect(readLoginPortal({})).toBe('student');
+    });
+});
+
+describe('normalizeIp', () => {
+    it('strips the IPv4-mapped IPv6 prefix and leaves everything else alone', () => {
+        expect(normalizeIp('::ffff:10.0.0.5')).toBe('10.0.0.5');
+        expect(normalizeIp('10.0.0.5')).toBe('10.0.0.5');
+        expect(normalizeIp('::1')).toBe('::1');
+        expect(normalizeIp(undefined)).toBeUndefined();
     });
 });

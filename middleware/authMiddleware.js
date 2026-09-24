@@ -42,8 +42,9 @@ export async function authMiddleware(req, res, next) {
         return res.status(401).json({ success: false, message: "Invalid or expired token." });
     }
 
+    let session;
     try {
-        const session = await prisma.session.findUnique({ where: { sessionToken: token } });
+        session = await prisma.session.findUnique({ where: { sessionToken: token } });
         if (!session || session.expiresAt <= new Date()) {
             return res.status(401).json({ success: false, message: "Session has been revoked or expired. Please log in again." });
         }
@@ -53,6 +54,10 @@ export async function authMiddleware(req, res, next) {
     }
 
     req.user = { email: decoded.email, role: decoded.role };
+    // The Session row this request was matched to, so a handler can act on
+    // this exact session - e.g. POST /api/logout deleting it
+    // (controllers/authController.js#logout).
+    req.auth = { sessionId: session.id, userId: session.userId ?? null };
     next();
 }
 

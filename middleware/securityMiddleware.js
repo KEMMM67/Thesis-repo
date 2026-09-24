@@ -19,6 +19,36 @@ const LEARNABLE_VERDICTS = new Set(['ALLOW', 'LOG']);
 const IDENTITY_LABELS = { device: 'Device', ip: 'IP', account: 'Account' };
 
 /**
+ * The fixed shape every WEVA audit narrative starts with - written below,
+ * and by middleware/ipWhitelistMiddleware.js for network denials:
+ * "<Device|IP|Account> <key> triggered <VERDICT>".
+ */
+const VERDICT_PATTERN = /^(?:Device|IP|Account) \S+ triggered (ALLOW|LOG|THROTTLE|BLOCK)\b/;
+
+/**
+ * Reads the verdict back out of a WEVA audit narrative, for the admin
+ * dashboard's Security Logs badges (GET /api/admin/logs in server.js).
+ *
+ * The dashboard used to color a row by searching its whole description
+ * for "ALLOW", "THROTTLE" or "BLOCK" - and part of that description is the
+ * client-chosen x-device-id. A device named "DEV-ALLOWED" turned its own
+ * BLOCK rows green (reproduced). This reads only the one position the
+ * server writes the verdict into, anchored to the start of the narrative.
+ * The key in front of it cannot shift that position, because no key can
+ * contain a space: device IDs are limited to letters, digits, "_" and "-"
+ * (middleware/clientIdentity.js), IPs never contain one, and account emails
+ * are refused with one (POST /api/admin/accounts). So
+ * "Device ALLOW triggered BLOCK | ..." still reads as BLOCK.
+ *
+ * @param {string|null|undefined} description - A BehaviorLog description.
+ * @returns {"ALLOW"|"LOG"|"THROTTLE"|"BLOCK"|null} The verdict, or null for any other kind of log (e.g. "User logged in successfully.").
+ */
+export function readVerdict(description) {
+    const match = typeof description === 'string' ? VERDICT_PATTERN.exec(description) : null;
+    return match ? match[1] : null;
+}
+
+/**
  * The endpoint a request is scored as: the Express route pattern that
  * matched it (e.g. "/api/students/:id"), prefixed with its router's mount
  * path - or the concrete path when no route has matched yet.

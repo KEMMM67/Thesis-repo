@@ -8,49 +8,31 @@ import { fileURLToPath } from "url";
 import https from "https";
 import fs from "fs";
 import { authMiddleware, requireRole } from "./middleware/authMiddleware.js";
+import { apiNotFound, jsonErrorHandler } from "./middleware/errorHandlers.js";
 import prisma from "./config/prisma.js";
 import { securityConfig } from "./config/securityConfig.js";
+import { resolveTrustProxy } from "./config/trustProxy.js";
 import { PrismaAuditSink, PrismaIpTrackingStore, PrismaIdentityResolver } from "./adapters/prisma/index.js";
 import { createWeva } from "./core/weva.js";
 import { parseAccountKey } from "./middleware/clientIdentity.js";
+import { readVerdict } from "./middleware/securityMiddleware.js";
 import { summarizeGrades } from "./utils/gradeSummary.js";
+import { GRADE_SCALE, parseGrade, parseShortText } from "./utils/gradeScale.js";
 import { streamDatabaseExport } from "./utils/databaseExport.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Which X-Forwarded-For entries to believe when resolving req.ip. Render's
-// edge terminates TLS and forwards each request to this process through its
-// own private network, and every proxy on the way appends the address it
-// received the request from. Without trusting those proxies, req.ip would be
-// a Render proxy's address for every request - collapsing WEVA's per-IP
-// scoring (core/ipAttempts.js), the campus-intranet IP whitelist
-// (middleware/ipWhitelistMiddleware.js), and the login-attempt audit trail
-// onto one shared "IP" for every user.
-//
-// On Render a request passes through Cloudflare, then Render's load balancer,
-// then an internal proxy, and arrives with a header shaped like:
-//
-//   X-Forwarded-For: 81.97.145.24, 172.71.195.123, 10.226.90.65
-//                    client        Cloudflare edge  Render internal
-//
-// with the socket itself coming from that internal proxy. Trusting 3 hops
-// walks back past the socket, 10.226.90.65 and 172.71.195.123 and stops on the
-// client. Both earlier values were wrong, and each failure showed up in the
-// logs: trusting 1 hop gave the Render-internal address (10.26.132.94) for
-// everyone; trusting private ranges stopped on the Cloudflare edge address,
-// which changes from request to request, so WEVA's IP layer never saw a bot's
-// attempts land on one "IP" and a rotating-device bot got 15 password checks
-// before its first throttle instead of 4.
-//
-// Spoof-proof, unlike `true`: Cloudflare and Render append to
-// X-Forwarded-For rather than resetting it, so anything a client writes into
-// the header sits to the LEFT of the entry Cloudflare recorded and is never
-// reached. If Render ever adds or removes a hop, this number must follow -
-// check that the [SECURITY] log's IP matches https://api.ipify.org. Harmless
-// locally: a direct connection sends no X-Forwarded-For, so req.ip is the
-// loopback client.
-app.set('trust proxy', 3);
+// Which X-Forwarded-For entries to believe when resolving req.ip - the
+// address WEVA's IP layer (core/ipAttempts.js), the campus-intranet IP
+// whitelist (middleware/ipWhitelistMiddleware.js) and the login-attempt
+// audit trail all rely on. It must match the deployment's proxy chain
+// exactly: 3 hops on Render, none on a local or LAN server, or
+// TRUST_PROXY_HOPS when set. This used to be a hard-coded 3, which let any
+// client of a non-Render server forge its own IP. See config/trustProxy.js.
+const trustProxy = resolveTrustProxy(process.env);
+app.set('trust proxy', trustProxy.hops);
+console.log(`[CONFIG] trust proxy: ${trustProxy.hops} hop(s) - ${trustProxy.source}`);
 
 if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET is not set. Add it to your .env file before starting the server.");
@@ -213,7 +195,11 @@ app.use("/api", weva.authRoutes());
  * @route GET /api/admin/logs
  * @access Admin
  * @description Returns the 50 most recent behavior log entries for the
- * Admin Monitoring Dashboard.
+ * Admin Monitoring Dashboard. Each WEVA evaluation carries its `verdict`
+ * (ALLOW/LOG/THROTTLE/BLOCK, else null) as its own field, read from the
+ * one position the server writes it - so the dashboard colors a row by
+ * that field, never by searching the description, part of which is the
+ * client-chosen device ID (see middleware/securityMiddleware.js#readVerdict).
  */
 app.get("/api/admin/logs", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     try {
@@ -226,6 +212,7 @@ app.get("/api/admin/logs", ipWhitelistMiddleware, authMiddleware, requireRole('a
             id: log.id,
             user_email: log.userEmail,
             event_type: log.eventType,
+            verdict: readVerdict(log.description),
             description: log.description,
             formatted_time: formatLogTime(log.logTime)
         }));
@@ -883,15 +870,39 @@ app.get("/api/grades", ipWhitelistMiddleware, authMiddleware, requireRole('admin
     }
 });
 
+/** Message for a grade that is not on the scale (see utils/gradeScale.js). */
+const INVALID_GRADE_MESSAGE = `grade must be one of ${GRADE_SCALE.join(', ')}, or null for an incomplete/dropped subject.`;
+
+/**
+ * Reads a numeric record id from a route parameter.
+ *
+ * @param {string} value - e.g. req.params.id
+ * @returns {number|null} The id, or null if it is not a positive integer.
+ */
+function recordId(value) {
+    const id = Number(value);
+    return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 /**
  * @route POST /api/grades
  * @access Admin
- * @description Records a new grade for a student in a subject.
+ * @description Records a new grade for a student in a subject. The grade is
+ * checked against the grading scale before it is encrypted and stored -
+ * the encrypted column can no longer reject a bad value itself (see
+ * utils/gradeScale.js).
  */
 app.post("/api/grades", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
-    const { studentId, subjectCode, term, grade, remarks } = req.body || {};
-    if (!studentId || !subjectCode) {
+    const { studentId, subjectCode } = req.body || {};
+    if (typeof studentId !== 'string' || typeof subjectCode !== 'string' || !studentId || !subjectCode) {
         return res.status(400).json({ success: false, message: "studentId and subjectCode are required." });
+    }
+    const grade = parseGrade(req.body.grade);
+    if (!grade.ok) return res.status(400).json({ success: false, message: INVALID_GRADE_MESSAGE });
+    const term = parseShortText(req.body.term);
+    const remarks = parseShortText(req.body.remarks);
+    if (!term.ok || !remarks.ok) {
+        return res.status(400).json({ success: false, message: "term and remarks must be text of at most 50 characters." });
     }
 
     try {
@@ -901,7 +912,7 @@ app.post("/api/grades", ipWhitelistMiddleware, authMiddleware, requireRole('admi
         if (!subject) return res.status(404).json({ success: false, message: `Subject ${subjectCode} not found.` });
 
         const created = await prisma.grade.create({
-            data: { studentId: student.id, subjectId: subject.id, term, grade, remarks }
+            data: { studentId: student.id, subjectId: subject.id, term: term.value, grade: grade.value, remarks: remarks.value }
         });
         res.status(201).json({ success: true, message: `Grade recorded for ${studentId} in ${subjectCode}.`, grade: created });
     } catch (err) {
@@ -916,16 +927,23 @@ app.post("/api/grades", ipWhitelistMiddleware, authMiddleware, requireRole('admi
 /**
  * @route PUT /api/grades/:id
  * @access Admin
- * @description Updates an existing grade record.
+ * @description Updates an existing grade record's grade and/or remarks.
+ * Fields left out of the body are left unchanged; the grade is checked
+ * against the grading scale as in POST /api/grades.
  */
 app.put("/api/grades/:id", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
-    const { grade, remarks } = req.body || {};
+    const gradeId = recordId(id);
+    if (gradeId == null) return res.status(400).json({ success: false, message: "Grade id must be a positive integer." });
+    const grade = parseGrade(req.body?.grade);
+    if (!grade.ok) return res.status(400).json({ success: false, message: INVALID_GRADE_MESSAGE });
+    const remarks = parseShortText(req.body?.remarks);
+    if (!remarks.ok) return res.status(400).json({ success: false, message: "remarks must be text of at most 50 characters." });
 
     try {
         const updated = await prisma.grade.update({
-            where: { id: Number(id) },
-            data: { grade, remarks }
+            where: { id: gradeId },
+            data: { grade: grade.value, remarks: remarks.value }
         });
         res.json({ success: true, message: `Grade ${id} updated.`, grade: updated });
     } catch (err) {
@@ -944,9 +962,11 @@ app.put("/api/grades/:id", ipWhitelistMiddleware, authMiddleware, requireRole('a
  */
 app.delete("/api/grades/:id", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
+    const gradeId = recordId(id);
+    if (gradeId == null) return res.status(400).json({ success: false, message: "Grade id must be a positive integer." });
 
     try {
-        await prisma.grade.delete({ where: { id: Number(id) } });
+        await prisma.grade.delete({ where: { id: gradeId } });
         res.json({ success: true, message: `Grade ${id} removed.` });
     } catch (err) {
         if (err.code === 'P2025') {
@@ -967,8 +987,15 @@ app.delete("/api/grades/:id", ipWhitelistMiddleware, authMiddleware, requireRole
 app.post("/api/admin/accounts", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { email, password } = req.body || {};
 
-    if (!email || !password) {
+    if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
         return res.status(400).json({ success: false, message: "email and password are required." });
+    }
+    // A single address with no spaces. Besides being what an email is, an
+    // account email appears inside WEVA's audit narratives, and the
+    // dashboard's verdict reader relies on it containing no space
+    // (middleware/securityMiddleware.js#readVerdict).
+    if (email.length > 255 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ success: false, message: "Enter a valid email address." });
     }
     if (password.length < 8) {
         return res.status(400).json({ success: false, message: "Password must be at least 8 characters." });
@@ -1041,6 +1068,15 @@ app.post("/api/settings/restore", ipWhitelistMiddleware, authMiddleware, require
 app.post("/api/demo/ping", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     res.json({ success: true, message: "Ping scored by the WEVA pipeline." });
 });
+
+// ---------------------------------------------------------------------
+// ERROR HANDLING - registered after every route, so they only see what
+// nothing else handled. Unknown API paths get a JSON 404, and any error -
+// malformed JSON, a bug in a handler - gets a JSON body with no stack
+// trace, whatever NODE_ENV is (see middleware/errorHandlers.js).
+// ---------------------------------------------------------------------
+app.use('/api', apiNotFound);
+app.use(jsonErrorHandler);
 
 // ---------------------------------------------------------------------
 // HTTP vs HTTPS LISTENER

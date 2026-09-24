@@ -1,5 +1,6 @@
 import { securityConfig } from "../config/securityConfig.js";
 import { getIntrusionScore } from "../core/scorer.js";
+import { normalizeIp, readLoginPortal } from "./clientIdentity.js";
 
 /**
  * @fileoverview Network-perimeter access control for the Admin Portal,
@@ -12,9 +13,8 @@ import { getIntrusionScore } from "../core/scorer.js";
  * or behavioral score is attempted.
  *
  * This module never imports Prisma (or any other storage client) itself.
- * Persisting a rejected attempt and resolving a submitted email's role are
- * delegated entirely to the `auditSink`, `ipTrackingStore`, and
- * `identityResolver` ports (see core/ports.js) injected into the two
+ * Persisting a rejected attempt is delegated entirely to the `auditSink`
+ * and `ipTrackingStore` ports (see core/ports.js) injected into the two
  * factories below; the default, Prisma-backed implementations are
  * constructed once in server.js via core/weva.js's createWeva().
  * `isEnabled()`/`getAllowedIps()` still
@@ -35,7 +35,8 @@ import { getIntrusionScore } from "../core/scorer.js";
  *      *only* step needed to disable enforcement entirely, with no other
  *      state to reset.
  *
- *   2. normalizeIp() strips Node's IPv4-mapped IPv6 notation
+ *   2. normalizeIp() (middleware/clientIdentity.js, shared with WEVA's IP
+ *      layer) strips Node's IPv4-mapped IPv6 notation
  *      (`::ffff:127.0.0.1` -> `127.0.0.1`) before every comparison. This
  *      is what Express's req.ip commonly reports for a plain IPv4
  *      loopback connection on this platform's dual-stack listener -
@@ -53,12 +54,13 @@ import { getIntrusionScore } from "../core/scorer.js";
  *     chain - see controllers/authController.js). Mount its returned
  *     middleware first, before authMiddleware, on all of those.
  *
- *   - createIpWhitelistForAdminLogin: role-aware enforcement, for POST
+ *   - createIpWhitelistForAdminLogin: portal-aware enforcement, for POST
  *     /api/login specifically. That route is shared by both the student
  *     and admin portals and has no req.user yet to consult (login is
  *     pre-auth by definition), so it cannot use the unconditional
- *     variant without also blocking students from an unlisted IP -
- *     see its own doc comment below for how it resolves that.
+ *     variant without also blocking students from an unlisted IP - it
+ *     enforces only for requests from the Admin Portal; see its own doc
+ *     comment below for why that, and not the account's role, decides.
  */
 
 /**
@@ -66,18 +68,6 @@ import { getIntrusionScore } from "../core/scorer.js";
  */
 function isEnabled() {
     return (process.env.ENABLE_IP_WHITELIST || '').trim().toLowerCase() === 'true';
-}
-
-/**
- * Strips Node's IPv4-mapped IPv6 prefix, so "::ffff:127.0.0.1" and
- * "127.0.0.1" compare equal. See this file's @fileoverview.
- *
- * @param {string} ip
- * @returns {string}
- */
-export function normalizeIp(ip) {
-    if (!ip) return ip;
-    return ip.startsWith('::ffff:') ? ip.slice(7) : ip;
 }
 
 /**
@@ -192,47 +182,38 @@ export function createIpWhitelistMiddleware({ auditSink, ipTrackingStore }) {
 }
 
 /**
- * Builds the role-aware network-origin gate for POST /api/login
- * specifically.
+ * Builds the network-origin gate for POST /api/login specifically.
  *
  * Every other route this module gates is admin-only by construction, so
  * createIpWhitelistMiddleware's returned middleware can enforce
- * unconditionally. Login is different: it is the single shared endpoint
- * for both the student and admin portals (see controllers/authController.js),
- * and - being pre-auth by definition - has no req.user yet for this
- * middleware to consult. So this peeks at the *submitted* email's role,
- * via the injected `identityResolver`, before deciding whether to enforce
- * at all: a student's login is never subject to this check, at any IP,
- * satisfying "this must not block Student logins, only Admins." An email
- * that resolves to no account, or to a non-admin role, is passed through
- * unconditionally either way - the normal password check in
- * controllers/authController.js#login is what (correctly) rejects an
- * invalid one, not this middleware; this middleware only ever *adds* a
- * rejection on top of that, for a confirmed admin email from a
- * disallowed network.
+ * unconditionally. Login is different: it is the single endpoint both
+ * the Student and Admin Portals post to, so this gate enforces only for a
+ * request that declares the Admin Portal
+ * (middleware/clientIdentity.js#readLoginPortal) - a Student Portal login
+ * is never subject to it, at any IP, satisfying "this must not block
+ * Student logins, only Admins."
+ *
+ * It keys on the portal, not on the account. It used to look up the
+ * submitted email's role and refuse only admin emails, before any password
+ * check - so from outside the campus, trying an email told anyone whether
+ * it belonged to an administrator: 403 "Network Access Denied" for admins,
+ * 401 for everyone else. Now the Admin Portal answers every outside
+ * request the same way, whatever email is typed. The account-level rule
+ * that replaces the role lookup - administrators may sign in only through
+ * the Admin Portal - is enforced after the password check in
+ * controllers/authController.js#login, where the wrong portal fails exactly
+ * like a wrong password, so the Student Portal cannot be used as a way
+ * around this gate either.
  *
  * @param {object} deps
  * @param {import("../core/ports.js").AuditSink} deps.auditSink
  * @param {import("../core/ports.js").IpTrackingStore} deps.ipTrackingStore
- * @param {import("../core/ports.js").IdentityResolver} deps.identityResolver
  * @returns {import("express").RequestHandler}
  */
-export function createIpWhitelistForAdminLogin({ auditSink, ipTrackingStore, identityResolver }) {
+export function createIpWhitelistForAdminLogin({ auditSink, ipTrackingStore }) {
     return async function ipWhitelistForAdminLogin(req, res, next) {
         if (!isEnabled()) return next();
-
-        const email = req.body?.email;
-        if (!email) return next();
-
-        let identity;
-        try {
-            identity = await identityResolver.resolve(email);
-        } catch (err) {
-            console.error("[ipWhitelistMiddleware] Role lookup failed, allowing through to the normal login flow:", err.message);
-            return next();
-        }
-
-        if (identity?.role !== 'admin') return next();
+        if (readLoginPortal(req) !== 'admin') return next();
 
         const requestIp = normalizeIp(req.ip);
         if (getAllowedIps().includes(requestIp)) return next();

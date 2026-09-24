@@ -188,6 +188,33 @@ if (!localStorage.getItem('authToken')) {
     }
 
     /**
+     * Signs out for real: asks the server to end this session
+     * (POST /api/logout deletes its Session row, so the token stops working
+     * everywhere at once), then clears this browser's copy and returns to
+     * the login page. Logout used to be only the second half, which left the
+     * session valid for up to an hour for anyone holding a copy of the
+     * token. If the server cannot be reached (5 s timeout), the browser still
+     * signs out; the session then just expires on its own schedule.
+     *
+     * @returns {Promise<void>}
+     */
+    async function logout() {
+        const token = localStorage.getItem('authToken');
+        if (token) {
+            try {
+                await fetch(`${API_BASE}/api/logout`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    signal: AbortSignal.timeout(5000)
+                });
+            } catch (err) {
+                console.warn('[admin_dashboard] Server-side logout failed; signing out locally anyway:', err);
+            }
+        }
+        goToLogin();
+    }
+
+    /**
      * Wraps `fetch()` for every authMiddleware-protected route, attaching
      * the bearer token and device telemetry, and centralizing
      * session-expiry handling.
@@ -334,6 +361,11 @@ if (!localStorage.getItem('authToken')) {
         }, 1000);
     }
 
+    /** Security Logs badge per WEVA verdict (GET /api/admin/logs's `verdict`). */
+    const VERDICT_BADGES = { ALLOW: 'bg-success', LOG: 'bg-info', THROTTLE: 'bg-warning', BLOCK: 'bg-danger' };
+    /** Badge for log entries that are not WEVA evaluations, by their server-set event type. */
+    const EVENT_BADGES = { LOGIN_SUCCESS: 'bg-success', LOGIN_FAILED: 'bg-warning' };
+
     /**
      * Fetches and renders the Security Logs table. Declared at top level
      * so both the sidebar navigation handler and the refresh button can
@@ -350,10 +382,12 @@ if (!localStorage.getItem('authToken')) {
             if (data.success) {
                 tableBody.innerHTML = '';
                 data.logs.forEach(log => {
-                    let badgeClass = 'bg-info';
-                    if (log.event_type.includes('SUCCESS') || log.description.includes('ALLOW')) badgeClass = 'bg-success';
-                    else if (log.event_type.includes('FAILED') || log.description.includes('THROTTLE')) badgeClass = 'bg-warning';
-                    else if (log.description.includes('BLOCK')) badgeClass = 'bg-danger';
+                    // Colored by structured fields only: the verdict the
+                    // server read from its own fixed position in the
+                    // narrative, else the event type. Searching the
+                    // description itself let a device named "DEV-ALLOWED"
+                    // turn its own BLOCK rows green.
+                    const badgeClass = VERDICT_BADGES[log.verdict] || EVENT_BADGES[log.event_type] || 'bg-info';
 
                     tableBody.innerHTML += `
                         <tr>
@@ -758,7 +792,8 @@ if (!localStorage.getItem('authToken')) {
         btnLogout.addEventListener('click', (e) => {
             e.preventDefault();
             closeAccountMenu();
-            goToLogin();
+            btnLogout.disabled = true;
+            logout();
         });
 
         console.log('[admin_dashboard] Account menu wired successfully.');

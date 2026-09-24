@@ -180,18 +180,35 @@ if (!localStorage.getItem('authToken')) {
     // =============================================================
     // LOGOUT
     // =============================================================
-    // Clears the stored session before the link navigates back to the login
-    // page, consistent with goToLogin() above - without this, a stale
-    // JWT/email would linger in localStorage after logout instead of being
-    // cleared immediately.
+    // Ends the session on the server first (POST /api/logout deletes its
+    // Session row, so the token stops working everywhere at once), then
+    // clears this browser's copy and follows the link back to the login
+    // page. Clearing localStorage alone - all this used to do - left the
+    // session valid for up to an hour for anyone holding a copy of the
+    // token. If the server cannot be reached (5 s timeout), the browser
+    // still signs out; the session then expires on its own schedule.
     try {
         console.log('[student_dashboard] Wiring logout...');
         const btnLogout = document.getElementById('btnLogout');
         if (!btnLogout) throw new Error('#btnLogout not found in the DOM.');
 
-        btnLogout.addEventListener('click', () => {
+        btnLogout.addEventListener('click', async (event) => {
+            event.preventDefault();
+            const token = localStorage.getItem('authToken');
+            if (token) {
+                try {
+                    await fetch(`${API_BASE}/api/logout`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}` },
+                        signal: AbortSignal.timeout(5000)
+                    });
+                } catch (err) {
+                    console.warn('[student_dashboard] Server-side logout failed; signing out locally anyway:', err);
+                }
+            }
             localStorage.removeItem('authToken');
             localStorage.removeItem('userEmail');
+            window.location.href = btnLogout.getAttribute('href') || 'index.html';
         });
         console.log('[student_dashboard] Logout wired successfully.');
     } catch (err) {

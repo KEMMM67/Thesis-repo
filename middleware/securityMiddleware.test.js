@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createSecurityMiddleware } from './securityMiddleware.js';
+import { createSecurityMiddleware, readVerdict } from './securityMiddleware.js';
 import { settleDeviceAttempts } from '../core/monitor.js';
 import { settleIpAttempts } from '../core/ipAttempts.js';
 
@@ -287,5 +287,26 @@ describe('securityMiddleware - endpoint weight from the matched route (#4)', () 
         await send(middleware, loginRequest({ deviceId, ip, email: 'x@x.edu.ph' }));
         await send(middleware, loginRequest({ deviceId, ip, email: 'x@x.edu.ph' }));
         expect(audits[1].reason).toMatch(/ x 2 x /);
+    });
+});
+
+describe('readVerdict - Security Logs badge colors (#10)', () => {
+    it('reads the verdict from the fixed position the server writes it', () => {
+        expect(readVerdict('Device DEV-1a2b3c4d triggered LOG | 2 x 2 x 1.5 x 5 = 30')).toBe('LOG');
+        expect(readVerdict('IP 203.0.113.7 triggered BLOCK (recent login attempts from any device; device DEV-x alone scored 0) | 2 x 2 x 4.5 x 5 = 90')).toBe('BLOCK');
+        expect(readVerdict('Account admin@x.edu.ph triggered THROTTLE (requests from every device signed in to it; device DEV-x alone scored 0) | 5 x 3 x 1 x 5 = 75')).toBe('THROTTLE');
+        expect(readVerdict('IP 203.0.113.7 triggered BLOCK (unauthorized network origin - admin portal is Campus-Intranet-restricted) | NETWORK POLICY VIOLATION')).toBe('BLOCK');
+    });
+
+    it('cannot be steered by a device ID that spells a verdict (a BLOCK used to render green)', () => {
+        expect(readVerdict('Device DEV-ALLOWED triggered BLOCK | 1000 x 2 x 2 x 5 = 100')).toBe('BLOCK');
+        expect(readVerdict('Device ALLOW triggered BLOCK | 1000 x 2 x 2 x 5 = 100')).toBe('BLOCK');
+        expect(readVerdict('Device BLOCK triggered ALLOW | 0 x 2 x 1 x 5 = 0')).toBe('ALLOW');
+    });
+
+    it('returns null for anything that is not a WEVA evaluation', () => {
+        expect(readVerdict('User logged in successfully.')).toBeNull();
+        expect(readVerdict('Invalid password attempted. triggered BLOCK')).toBeNull();
+        expect(readVerdict(null)).toBeNull();
     });
 });

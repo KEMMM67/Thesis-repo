@@ -304,7 +304,10 @@ loginForm.addEventListener('submit', async function (event) {
                 'Content-Type': 'application/json',
                 'x-device-id': deviceId
             },
-            body: JSON.stringify({ email: emailValue, password: passwordValue })
+            // portal: 'admin' - administrators can sign in only through this
+            // page, and it is the one the campus-network whitelist guards
+            // (see middleware/clientIdentity.js#readLoginPortal).
+            body: JSON.stringify({ email: emailValue, password: passwordValue, portal: 'admin' })
         });
 
         const data = await readJson(response);
@@ -466,7 +469,7 @@ resendOtpBtn.addEventListener('click', async () => {
                 'Content-Type': 'application/json',
                 'x-device-id': deviceId
             },
-            body: JSON.stringify({ email: pendingOtpEmail, password: pendingOtpPassword })
+            body: JSON.stringify({ email: pendingOtpEmail, password: pendingOtpPassword, portal: 'admin' })
         });
 
         const data = await readJson(response);

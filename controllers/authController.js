@@ -1,10 +1,10 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { randomInt, timingSafeEqual } from "crypto";
+import { randomBytes, randomInt, timingSafeEqual } from "crypto";
 import prisma from "../config/prisma.js";
 import { settleDeviceAttempts } from "../core/monitor.js";
 import { settleIpAttempts } from "../core/ipAttempts.js";
-import { getClientIdentity, normalizeAccount } from "../middleware/clientIdentity.js";
+import { getClientIdentity, normalizeAccount, readLoginPortal } from "../middleware/clientIdentity.js";
 import { sendLoginAlert, sendOtpEmail } from "../utils/emailService.js";
 
 /**
@@ -31,6 +31,17 @@ import { sendLoginAlert, sendOtpEmail } from "../utils/emailService.js";
 
 /** OTP validity window: 5 minutes from issuance, so an intercepted or leaked code stops working quickly. */
 const OTP_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * A bcrypt hash of a random, never-stored string, at cost 10 - the same cost
+ * as every real password hash in this app (prisma/seed.js,
+ * prisma/create-admin.js, POST /api/admin/accounts). login() compares
+ * against it when the submitted email has no account, so an unknown email
+ * takes the same bcrypt time as a real account with a wrong password - see
+ * login() for the timing oracle this closes. Nothing can match it: the
+ * string it hashes exists only for the moment it takes to compute.
+ */
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync(randomBytes(32).toString('hex'), 10);
 
 /**
  * Wrong codes allowed per issued OTP before it is cancelled (see
@@ -286,28 +297,57 @@ async function beginOtpChallenge(user, res) {
  * before a single request reaches the bcrypt.compare() or database calls
  * below (see core/scorer.js, core/mitigation.js).
  *
+ * Nothing in the response says whether an account exists or what role it
+ * has - every failure is the same 401 "Invalid email or password.":
+ *
+ *   - Same timing. Every request runs exactly one bcrypt comparison: the
+ *     account's own hash, or DUMMY_PASSWORD_HASH when the email has no
+ *     account. An unknown email used to skip bcrypt and answer measurably
+ *     faster than a real one with a wrong password.
+ *   - One portal per role. Administrators sign in only through the Admin
+ *     Portal and everyone else only through the Student Portal
+ *     (middleware/clientIdentity.js#readLoginPortal). Credentials used on
+ *     the wrong portal fail exactly like a wrong password - even correct
+ *     ones - so neither portal can be used to learn who is an admin. The
+ *     Admin Portal is the one the campus-network whitelist guards, and it
+ *     now refuses outside networks whatever email is typed; it used to
+ *     refuse only admin emails, before the password check, which told
+ *     anyone outside the campus which emails were administrator accounts.
+ *
  * @param {import("express").Request} req
  * @param {import("express").Response} res
  * @returns {Promise<void>}
  */
 export async function login(req, res) {
-    const { email, password } = req.body;
+    // `|| {}`: a POST with no JSON body leaves req.body undefined in Express 5,
+    // and destructuring it used to throw - answered with an HTML stack trace.
+    const { email, password } = req.body || {};
+    if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
+        return res.status(400).json({ success: false, message: "Email and password are required." });
+    }
+    const portal = readLoginPortal(req);
     // Same identity derivation securityMiddleware scored this request under,
-    // so completeLogin() clears exactly those keys.
+    // so completeLogin() settles exactly those keys.
     const { ip: ipAddress, deviceKey: deviceId } = getClientIdentity(req);
 
     try {
         const user = await prisma.user.findUnique({ where: { email } });
-        const passwordMatches = user ? await bcrypt.compare(password, user.passwordHash) : false;
+        const hashMatches = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+        const passwordMatches = Boolean(user) && hashMatches;
+        const rightPortal = Boolean(user) && (user.role === 'admin') === (portal === 'admin');
 
-        if (passwordMatches) {
+        if (passwordMatches && rightPortal) {
             if (user.role === 'admin') {
                 await beginOtpChallenge(user, res);
             } else {
                 await completeLogin(user, ipAddress, deviceId, res);
             }
         } else {
-            await recordFailedAttempt(email, user, ipAddress, 'Invalid password attempted.');
+            // The audit trail keeps the real reason; the response never does.
+            const reason = passwordMatches
+                ? `Correct password on the wrong portal: ${user.role} account on the ${portal === 'admin' ? 'Admin' : 'Student'} Portal.`
+                : 'Invalid password attempted.';
+            await recordFailedAttempt(email, user, ipAddress, reason);
             res.status(401).json({ success: false, message: "Invalid email or password." });
         }
     } catch (err) {
@@ -347,10 +387,10 @@ export async function login(req, res) {
  * @returns {Promise<void>}
  */
 export async function verifyOtp(req, res) {
-    const { email, otp } = req.body;
+    const { email, otp } = req.body || {};
     const { ip: ipAddress, deviceKey: deviceId } = getClientIdentity(req);
 
-    if (!email || !otp) {
+    if (typeof email !== 'string' || typeof otp !== 'string' || !email || !otp) {
         return res.status(400).json({ success: false, message: "Email and OTP are required." });
     }
 
@@ -418,4 +458,40 @@ export async function verifyOtp(req, res) {
         console.error("OTP verification error:", err);
         res.status(500).json({ success: false, message: "Internal Server Error" });
     }
+}
+
+/**
+ * @route POST /api/logout
+ * @access Any signed-in user - mounted behind authMiddleware in routes/authRoutes.js
+ * @description Ends the caller's session on the server. authMiddleware has
+ * already matched this request's token to its Session row (req.auth);
+ * deleting that row makes the token stop working at once, because
+ * authMiddleware requires a live Session row, not just a valid signature -
+ * the same mechanism as the admin's "Force Logout / Revoke".
+ *
+ * Logout used to happen only in the browser: the dashboards cleared
+ * localStorage and went back to the login page, while the session itself
+ * stayed valid for up to an hour for anyone holding a copy of the token.
+ *
+ * @param {import("express").Request} req
+ * @param {import("express").Response} res
+ * @returns {Promise<void>}
+ */
+export async function logout(req, res) {
+    try {
+        await prisma.session.deleteMany({ where: { id: req.auth.sessionId } });
+    } catch (err) {
+        console.error("Session revocation failed on logout:", err.message);
+        return res.status(500).json({ success: false, message: "Could not sign out. Please try again." });
+    }
+
+    try {
+        await prisma.behaviorLog.create({
+            data: { userEmail: req.user.email, userId: req.auth.userId, eventType: 'LOGOUT', description: 'User signed out; session revoked.' }
+        });
+    } catch (logErr) {
+        console.error("Audit log write failed on logout:", logErr.message);
+    }
+
+    res.json({ success: true, message: "Signed out." });
 }
