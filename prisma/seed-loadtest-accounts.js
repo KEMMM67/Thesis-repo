@@ -1,4 +1,4 @@
-git add public/admin_dashboard.js public/admin_login.js public/script.jsimport bcrypt from 'bcryptjs';
+import bcrypt from 'bcryptjs';
 import { writeFileSync, mkdirSync } from 'fs';
 // Shared, encryption-extended singleton (config/prisma.js) - same reason
 // prisma/seed.js and prisma/seed-bulk.js use it: nothing here writes an
