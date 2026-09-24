@@ -4,190 +4,341 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard | SIS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="style.css">
 </head>
-<body class="dashboard-body">
+<body class="dashboard-body admin-console">
 
-    <div class="topbar">
-        <div class="logo"><i class="fa-solid fa-graduation-cap"></i> STUDENT INFORMATION SYSTEM</div>
-        <div class="user-info">
-            <span class="user-chip"><i class="fa-solid fa-user-shield"></i> System <span class="role-tag">ADMIN</span></span>
-            <div class="account-menu">
-                <button type="button" class="account-menu__trigger" id="btnAccountMenu" aria-haspopup="true" aria-expanded="false" title="Account menu">
-                    <i class="fa-solid fa-gear"></i>
-                </button>
-                <div class="account-menu__panel" id="accountMenuPanel" hidden>
-                    <button type="button" class="account-menu__item" id="btnGoToSettings"><i class="fa-solid fa-sliders"></i> Admin Settings</button>
-                    <button type="button" class="account-menu__item" id="btnLogout"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="wrapper">
-        <div class="sidebar">
-            <ul id="sidebar-nav">
-                <li class="active" data-section="section-dashboard"><i class="nav-icon fa-solid fa-gauge-high"></i><span class="nav-label">Dashboard</span></li>
-                <li data-section="section-student-records"><i class="nav-icon fa-solid fa-user-graduate"></i><span class="nav-label">Student Records</span></li>
-                <li data-section="section-subject-management"><i class="nav-icon fa-solid fa-book"></i><span class="nav-label">Subject Management</span></li>
-                <li data-section="section-grade-management"><i class="nav-icon fa-solid fa-square-poll-vertical"></i><span class="nav-label">Grade Management</span></li>
-                <li data-section="section-payment-records"><i class="nav-icon fa-solid fa-receipt"></i><span class="nav-label">Payment Records</span></li>
-                <li data-section="section-security-logs"><i class="nav-icon fa-solid fa-shield-halved"></i><span class="nav-label">Security &amp; Logs</span></li>
-                <li data-section="section-admin-settings"><i class="nav-icon fa-solid fa-sliders"></i><span class="nav-label">Admin Settings</span></li>
-            </ul>
-        </div>
-
-        <div class="content" id="main-content">
-            <h1 id="main-title">Admin Dashboard</h1>
-
-            <div class="section-container" id="section-dashboard" style="display: block;">
-                <div class="cards-container">
-                    <div class="card card--stat">
-                        <div class="card-icon"><i class="fa-solid fa-users"></i></div>
-                        <div class="card-body"><h3>Total Students Enrolled</h3><div class="value">12,847</div></div>
-                    </div>
-                    <div class="card card--stat">
-                        <div class="card-icon card-icon--danger"><i class="fa-solid fa-shield-halved"></i></div>
-                        <div class="card-body"><h3>Security Threats Blocked</h3><div class="value">24</div></div>
-                    </div>
-                    <div class="card card--stat">
-                        <div class="card-icon"><i class="fa-solid fa-book-open"></i></div>
-                        <div class="card-body"><h3>Total Subjects Offered</h3><div class="value">412</div></div>
-                    </div>
-                    <div class="card card--stat">
-                        <div class="card-icon"><i class="fa-solid fa-layer-group"></i></div>
-                        <div class="card-body"><h3>Active Sections</h3><div class="value">158</div></div>
-                    </div>
-                </div>
-                <div class="section-header">
-                    <h2>Live WEVA Anomaly Score Feed</h2>
-                    <button id="btnSimulateAttack" class="btn-secondary"><i class="fa-solid fa-bolt"></i> Simulate Attack</button>
-                </div>
-                <p class="text-muted" style="margin-bottom: 12px;">Real-time scores from the WEVA engine (core/scorer.js), polled every 1.5s. Triggering BLOCK will temporarily lock this device out of other admin actions for ~60 seconds &mdash; that's the mitigation layer engaging, not a bug.</p>
-                <div class="chart-canvas-wrap">
-                    <canvas id="anomalyChart"></canvas>
-                </div>
-                <p id="demoStatus" class="text-muted" style="margin-top: 10px;"></p>
+    <div class="console">
+        <aside class="console-sidebar" aria-label="Admin navigation">
+            <div class="console-brand">
+                <span class="console-brand__mark"><i class="fa-solid fa-graduation-cap"></i></span>
+                <span class="console-brand__text">
+                    <strong>SIS Admin</strong>
+                    <small>Student Information System</small>
+                </span>
             </div>
 
-            <div class="section-container" id="section-student-records">
-                <h2>All Student Records</h2>
-                <div class="search-bar">
-                    <input type="text" placeholder="Search by Student Name or ID...">
-                    <button><i class="fa-solid fa-magnifying-glass"></i> Search</button>
-                    <button id="btnAddStudent" class="btn-secondary"><i class="fa-solid fa-plus"></i> Add New Student</button>
+            <!-- admin_dashboard.js handles clicks on any <li> in #sidebar-nav and copies its
+                 visible text into #main-title, so each <li> holds only an icon and a label,
+                 and the group headings are <p> elements rather than <li>. -->
+            <nav id="sidebar-nav" class="console-nav">
+                <p class="console-nav__label">Overview</p>
+                <ul>
+                    <li class="active" data-section="section-dashboard"><i class="nav-icon fa-solid fa-gauge-high"></i><span class="nav-label">Dashboard</span></li>
+                </ul>
+                <p class="console-nav__label">Academics</p>
+                <ul>
+                    <li data-section="section-student-records"><i class="nav-icon fa-solid fa-user-graduate"></i><span class="nav-label">Student Records</span></li>
+                    <li data-section="section-subject-management"><i class="nav-icon fa-solid fa-book"></i><span class="nav-label">Subject Management</span></li>
+                    <li data-section="section-grade-management"><i class="nav-icon fa-solid fa-square-poll-vertical"></i><span class="nav-label">Grade Management</span></li>
+                    <li data-section="section-payment-records"><i class="nav-icon fa-solid fa-receipt"></i><span class="nav-label">Payment Records</span></li>
+                </ul>
+                <p class="console-nav__label">Security</p>
+                <ul>
+                    <li data-section="section-security-logs"><i class="nav-icon fa-solid fa-shield-halved"></i><span class="nav-label">Security &amp; Logs</span></li>
+                </ul>
+                <p class="console-nav__label">System</p>
+                <ul>
+                    <li data-section="section-admin-settings"><i class="nav-icon fa-solid fa-sliders"></i><span class="nav-label">Admin Settings</span></li>
+                </ul>
+            </nav>
+
+            <div class="console-sidebar__footer">
+                <div class="weva-status">
+                    <span class="weva-status__icon"><i class="fa-solid fa-shield-halved"></i></span>
+                    <span class="weva-status__text">
+                        <strong>WEVA protection</strong>
+                        <span><span class="weva-status__dot"></span> Behavioral scoring on</span>
+                    </span>
                 </div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Student ID</th>
-                            <th>Full Name</th>
-                            <th>Department</th>
-                            <th>Program</th>
-                            <th>Year Level</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="studentsTableBody">
-                        <tr><td colspan="7">Loading students...</td></tr>
-                    </tbody>
-                </table>
             </div>
+        </aside>
 
-            <div class="section-container" id="section-subject-management">
-                <h2>Subject Catalog</h2>
-                <div class="search-bar">
-                    <input type="text" placeholder="Search by Subject Code or Title...">
-                    <button><i class="fa-solid fa-magnifying-glass"></i> Search</button>
-                    <button id="btnAddSubject" class="btn-secondary"><i class="fa-solid fa-plus"></i> Add Subject</button>
+        <div class="console-main">
+            <header class="topbar">
+                <div class="console-topbar__title">
+                    <span class="console-topbar__crumb">Admin Console</span>
+                    <h1 id="main-title">Dashboard</h1>
                 </div>
-                <table>
-                    <thead>
-                        <tr><th>Subject Code</th><th>Subject Title</th><th>Units</th><th>Department</th><th>Actions</th></tr>
-                    </thead>
-                    <tbody id="subjectsTableBody">
-                        <tr><td colspan="5">Loading subjects...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="section-container" id="section-grade-management">
-                <h2>Generate Grade Report</h2>
-                <div class="search-bar"><input type="text" placeholder="Enter Student ID..."><button><i class="fa-solid fa-magnifying-glass"></i> Search</button></div>
-                <div class="chart-placeholder chart-placeholder--sm"><i class="fa-solid fa-magnifying-glass-chart"></i> Search a student to view/edit grades.</div>
-            </div>
-
-            <div class="section-container" id="section-payment-records">
-                <h2>All Student Payments</h2>
-                <div class="search-bar"><input type="text" placeholder="Search by Student ID or OR Number..."><button><i class="fa-solid fa-magnifying-glass"></i> Search</button></div>
-                <table>
-                    <thead>
-                        <tr><th>Student ID</th><th>OR Number</th><th>Date Paid</th><th>Amount (₱)</th><th>Description</th></tr>
-                    </thead>
-                    <tbody>
-                        <tr><td><strong>A23-00001</strong></td><td>OR-10201</td><td>2026-03-01</td><td>18,500.00</td><td>Full Tuition</td></tr>
-                        <tr><td><strong>A23-00002</strong></td><td>OR-10202</td><td>2026-03-05</td><td>10,000.00</td><td>Partial Tuition</td></tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="section-container" id="section-security-logs">
-                <div class="print-letterhead">
-                    <h1>Student Information System &mdash; Security Audit Report</h1>
-                    <p>WEVA Behavioral Security Engine (Web Endpoint Velocity &amp; Anomaly) &middot; Generated <span id="reportTimestamp"></span></p>
-                </div>
-                <div class="section-header">
-                    <h2>Live Security Logs</h2>
-                    <div class="btn-row">
-                        <button class="refresh-btn" id="btnRefreshLogs"><i class="fa-solid fa-rotate"></i> Refresh Live Data</button>
-                        <button class="btn-secondary" id="btnGenerateReport"><i class="fa-solid fa-print"></i> Generate Audit Report</button>
+                <div class="user-info">
+                    <span class="user-chip"><i class="fa-solid fa-user-shield"></i> System <span class="role-tag">ADMIN</span></span>
+                    <div class="account-menu">
+                        <button type="button" class="account-menu__trigger" id="btnAccountMenu" aria-haspopup="true" aria-expanded="false" title="Account menu">
+                            <i class="fa-solid fa-gear"></i>
+                        </button>
+                        <div class="account-menu__panel" id="accountMenuPanel" hidden>
+                            <button type="button" class="account-menu__item" id="btnGoToSettings"><i class="fa-solid fa-sliders"></i> Admin Settings</button>
+                            <button type="button" class="account-menu__item" id="btnLogout"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
+                        </div>
                     </div>
                 </div>
-                <table>
-                    <thead>
-                        <tr><th>Time</th><th>User Identifier</th><th>Event Status</th><th>System Action / Description</th></tr>
-                    </thead>
-                    <tbody id="logsTableBody">
-                        <tr><td colspan="4">Loading system logs...</td></tr>
-                    </tbody>
-                </table>
-            </div>
+            </header>
 
-            <div class="section-container" id="section-admin-settings">
-                <h2>Settings</h2>
-                <div class="settings-group">
-                    <h3>User Roles Management</h3>
-                    <div class="btn-row">
-                        <button class="btn-primary" id="btnCreateAdmin"><i class="fa-solid fa-user-plus"></i> Create New Admin Account</button>
-                        <button class="btn-secondary"><i class="fa-solid fa-key"></i> Manage System Access</button>
-                    </div>
-                </div>
-                <div class="settings-group">
-                    <h3>Database Backup</h3>
-                    <div class="btn-row">
-                        <button class="btn-primary" id="btnBackupDatabase"><i class="fa-solid fa-database"></i> Backup PostgreSQL DB</button>
-                        <button class="btn-secondary"><i class="fa-solid fa-rotate-left"></i> Restore DB from Backup</button>
-                    </div>
-                </div>
-                <div class="settings-group">
-                    <div class="section-header" style="margin-bottom: 14px;">
-                        <h3 style="margin: 0;">Blocked Devices (WEVA)</h3>
-                        <button class="refresh-btn" id="btnRefreshBlockedDevices"><i class="fa-solid fa-rotate"></i> Refresh</button>
-                    </div>
-                    <p class="text-muted" style="margin-bottom: 14px;">Devices currently locked out by the mitigation layer (core/mitigation.js), persisted in the database - these survive a server restart. Force Logout / Revoke lifts the block early and, if a session is found for whichever user this device was most recently seen as, ends it too.</p>
-                    <table>
-                        <thead>
-                            <tr><th>Device / IP</th><th>Blocked Until</th><th>Times Blocked</th><th>Actions</th></tr>
-                        </thead>
-                        <tbody id="blockedDevicesTableBody">
-                            <tr><td colspan="4">Loading blocked devices...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+            <main class="content" id="main-content">
 
+                <section class="section-container" id="section-dashboard" style="display: block;">
+                    <div class="stat-grid">
+                        <article class="stat-card">
+                            <span class="stat-card__icon"><i class="fa-solid fa-users"></i></span>
+                            <div>
+                                <p class="stat-card__label">Total Students Enrolled</p>
+                                <p class="stat-card__value">12,847</p>
+                            </div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-card__icon stat-card__icon--danger"><i class="fa-solid fa-shield-halved"></i></span>
+                            <div>
+                                <p class="stat-card__label">Security Threats Blocked</p>
+                                <p class="stat-card__value">24</p>
+                            </div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-card__icon"><i class="fa-solid fa-book-open"></i></span>
+                            <div>
+                                <p class="stat-card__label">Total Subjects Offered</p>
+                                <p class="stat-card__value">412</p>
+                            </div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-card__icon"><i class="fa-solid fa-layer-group"></i></span>
+                            <div>
+                                <p class="stat-card__label">Active Sections</p>
+                                <p class="stat-card__value">158</p>
+                            </div>
+                        </article>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel__header">
+                            <div>
+                                <h2 class="panel__title">Live WEVA Anomaly Score Feed</h2>
+                                <p class="panel__subtitle">Real-time scores from the WEVA engine (core/scorer.js), polled every 1.5 s.</p>
+                            </div>
+                        </div>
+                        <div class="panel__body">
+                            <div class="chart-canvas-wrap">
+                                <canvas id="anomalyChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="panel__footer">
+                            <button id="btnSimulateAttack" class="btn-secondary"><i class="fa-solid fa-bolt"></i> Simulate Attack</button>
+                            <p class="panel__hint"><i class="fa-solid fa-circle-info"></i> Triggering BLOCK will temporarily lock this device out of other admin actions for ~60 seconds &mdash; that's the mitigation layer engaging, not a bug.</p>
+                            <p id="demoStatus" class="panel__status"></p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="section-container" id="section-student-records">
+                    <div class="panel">
+                        <div class="panel__header">
+                            <div>
+                                <h2 class="panel__title">All Student Records</h2>
+                                <p class="panel__subtitle">Every student on file, with program, year level and enrollment status.</p>
+                            </div>
+                            <div class="panel__actions">
+                                <button id="btnAddStudent" class="btn-primary"><i class="fa-solid fa-plus"></i> Add New Student</button>
+                            </div>
+                        </div>
+                        <div class="panel__toolbar">
+                            <label class="search-field">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="search" placeholder="Search by student name or ID" aria-label="Search students">
+                            </label>
+                            <button class="btn-secondary">Search</button>
+                        </div>
+                        <div class="table-wrap">
+                            <table class="data-table has-actions">
+                                <thead>
+                                    <tr>
+                                        <th>Student ID</th>
+                                        <th>Full Name</th>
+                                        <th>Department</th>
+                                        <th>Program</th>
+                                        <th>Year Level</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="studentsTableBody">
+                                    <tr><td colspan="7">Loading students...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="section-container" id="section-subject-management">
+                    <div class="panel">
+                        <div class="panel__header">
+                            <div>
+                                <h2 class="panel__title">Subject Catalog</h2>
+                                <p class="panel__subtitle">Subjects offered this term, with units and owning department.</p>
+                            </div>
+                            <div class="panel__actions">
+                                <button id="btnAddSubject" class="btn-primary"><i class="fa-solid fa-plus"></i> Add Subject</button>
+                            </div>
+                        </div>
+                        <div class="panel__toolbar">
+                            <label class="search-field">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="search" placeholder="Search by subject code or title" aria-label="Search subjects">
+                            </label>
+                            <button class="btn-secondary">Search</button>
+                        </div>
+                        <div class="table-wrap">
+                            <table class="data-table has-actions">
+                                <thead>
+                                    <tr><th>Subject Code</th><th>Subject Title</th><th class="col-center">Units</th><th>Department</th><th>Actions</th></tr>
+                                </thead>
+                                <tbody id="subjectsTableBody">
+                                    <tr><td colspan="5">Loading subjects...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="section-container" id="section-grade-management">
+                    <div class="panel">
+                        <div class="panel__header">
+                            <div>
+                                <h2 class="panel__title">Generate Grade Report</h2>
+                                <p class="panel__subtitle">Look up a student to view or edit their grades.</p>
+                            </div>
+                        </div>
+                        <div class="panel__toolbar">
+                            <label class="search-field">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="search" placeholder="Enter student ID" aria-label="Student ID">
+                            </label>
+                            <button class="btn-secondary">Search</button>
+                        </div>
+                        <div class="empty-state">
+                            <span class="empty-state__icon"><i class="fa-solid fa-magnifying-glass-chart"></i></span>
+                            <p class="empty-state__title">No student selected</p>
+                            <p class="empty-state__text">Search a student to view or edit grades.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="section-container" id="section-payment-records">
+                    <div class="panel">
+                        <div class="panel__header">
+                            <div>
+                                <h2 class="panel__title">All Student Payments</h2>
+                                <p class="panel__subtitle">Recorded tuition payments and their official receipt numbers.</p>
+                            </div>
+                        </div>
+                        <div class="panel__toolbar">
+                            <label class="search-field">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="search" placeholder="Search by student ID or OR number" aria-label="Search payments">
+                            </label>
+                            <button class="btn-secondary">Search</button>
+                        </div>
+                        <div class="table-wrap">
+                            <table class="data-table">
+                                <thead>
+                                    <tr><th>Student ID</th><th>OR Number</th><th>Date Paid</th><th class="col-num">Amount (₱)</th><th>Description</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td><strong>A23-00001</strong></td><td>OR-10201</td><td>2026-03-01</td><td class="col-num">18,500.00</td><td>Full Tuition</td></tr>
+                                    <tr><td><strong>A23-00002</strong></td><td>OR-10202</td><td>2026-03-05</td><td class="col-num">10,000.00</td><td>Partial Tuition</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="section-container" id="section-security-logs">
+                    <div class="print-letterhead">
+                        <h1>Student Information System &mdash; Security Audit Report</h1>
+                        <p>WEVA Behavioral Security Engine (Web Endpoint Velocity &amp; Anomaly) &middot; Generated <span id="reportTimestamp"></span></p>
+                    </div>
+                    <div class="panel">
+                        <div class="panel__header">
+                            <div>
+                                <h2 class="panel__title">Live Security Logs</h2>
+                                <p class="panel__subtitle">Every WEVA evaluation, with the score formula behind each decision.</p>
+                            </div>
+                            <div class="panel__actions">
+                                <button class="refresh-btn" id="btnRefreshLogs"><i class="fa-solid fa-rotate"></i> Refresh Live Data</button>
+                                <button class="btn-secondary" id="btnGenerateReport"><i class="fa-solid fa-print"></i> Generate Audit Report</button>
+                            </div>
+                        </div>
+                        <div class="table-wrap">
+                            <table class="data-table data-table--logs">
+                                <thead>
+                                    <tr><th>Time</th><th>User Identifier</th><th>Event Status</th><th>System Action / Description</th></tr>
+                                </thead>
+                                <tbody id="logsTableBody">
+                                    <tr><td colspan="4">Loading system logs...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="section-container" id="section-admin-settings">
+                    <div class="settings-grid">
+                        <div class="panel">
+                            <div class="panel__header">
+                                <div>
+                                    <h2 class="panel__title">User Roles Management</h2>
+                                    <p class="panel__subtitle">Create administrator accounts and manage access to this console.</p>
+                                </div>
+                            </div>
+                            <div class="panel__body">
+                                <div class="btn-row">
+                                    <button class="btn-primary" id="btnCreateAdmin"><i class="fa-solid fa-user-plus"></i> Create New Admin Account</button>
+                                    <button class="btn-secondary"><i class="fa-solid fa-key"></i> Manage System Access</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="panel">
+                            <div class="panel__header">
+                                <div>
+                                    <h2 class="panel__title">Database Backup</h2>
+                                    <p class="panel__subtitle">Export a PostgreSQL backup, or restore from one.</p>
+                                </div>
+                            </div>
+                            <div class="panel__body">
+                                <div class="btn-row">
+                                    <button class="btn-primary" id="btnBackupDatabase"><i class="fa-solid fa-database"></i> Backup PostgreSQL DB</button>
+                                    <button class="btn-secondary"><i class="fa-solid fa-rotate-left"></i> Restore DB from Backup</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel__header">
+                            <div>
+                                <h2 class="panel__title">Blocked Devices (WEVA)</h2>
+                                <p class="panel__subtitle">Devices currently locked out by the mitigation layer (core/mitigation.js), persisted in the database - these survive a server restart. Force Logout / Revoke lifts the block early and, if a session is found for whichever user this device was most recently seen as, ends it too.</p>
+                            </div>
+                            <div class="panel__actions">
+                                <button class="refresh-btn" id="btnRefreshBlockedDevices"><i class="fa-solid fa-rotate"></i> Refresh</button>
+                            </div>
+                        </div>
+                        <div class="table-wrap">
+                            <table class="data-table has-actions">
+                                <thead>
+                                    <tr><th>Device / IP</th><th>Blocked Until</th><th class="col-num">Times Blocked</th><th>Actions</th></tr>
+                                </thead>
+                                <tbody id="blockedDevicesTableBody">
+                                    <tr><td colspan="4">Loading blocked devices...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+            </main>
         </div>
     </div>
 
