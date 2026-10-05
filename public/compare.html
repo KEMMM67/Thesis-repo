@@ -5,84 +5,296 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Algorithm Comparative Analysis | SIS</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: #f4f6f9; display: flex; flex-direction: column; min-height: 100vh; }
-        
-        /* Enverga Maroon Theme Navbar */
-        .topbar { background-color: #800000; color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .topbar .logo { font-weight: bold; font-size: 18px; letter-spacing: 1px; text-transform: uppercase; }
-        .topbar .subtitle { font-size: 14px; opacity: 0.8; }
+        :root {
+            --color-primary: #8b0000;
+            --color-primary-soft: #f8ecec;
+            --color-bg: #f3f4f7;
+            --surface: #ffffff;
+            --line: #e7e9ee;
+            --line-soft: #eef0f3;
+            --text: #1c1e21;
+            --text-secondary: #565b64;
+            --text-muted: #6f747d;
+            --good: #1e7d34;
+            --good-bg: #e9f7ee;
+            --bad: #c62828;
+            --bad-bg: #fdecea;
+            --warn-bg: #fef3e6;
+            --warn: #b9660b;
+            /* Chart marks - validated with the dataviz palette checks */
+            --mark-weva: #a8232a;
+            --mark-baseline: #7a7f88;
+            --mark-fail: #d03b3b;
+            --mark-ok: #858a93;
+            --grid: #e6e8ec;
+            --axis: #c9cdd3;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--color-bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.5; }
+        code { font-family: var(--mono); font-size: 0.92em; }
 
-        .container { padding: 40px; text-align: center; }
-        .header-text { color: #800000; margin-bottom: 30px; }
+        .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 32px; background: var(--surface); border-bottom: 1px solid var(--line); }
+        .brand { display: flex; align-items: center; gap: 12px; }
+        .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: var(--color-primary); color: #fff; font-weight: 700; font-size: 12px; letter-spacing: 0.04em; }
+        .brand strong { display: block; font-size: 15px; }
+        .brand > div > span { display: block; font-size: 12.5px; color: var(--text-muted); }
+        .topbar-link { color: var(--color-primary); font-weight: 600; text-decoration: none; font-size: 13.5px; }
+        .topbar-link:hover { text-decoration: underline; }
 
-        /* 3-Column Layout for Comparison */
-        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; max-width: 1200px; margin: 0 auto; }
-        
-        .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); border-top: 5px solid #ccc; transition: 0.3s; }
-        .card.traditional { border-top-color: #6c757d; } /* Gray for old tech */
-        .card.rulebased { border-top-color: #fd7e14; } /* Orange for strict rules */
-        .card.agentic { border-top-color: #28a745; border-width: 8px; transform: scale(1.02); box-shadow: 0 8px 15px rgba(0,0,0,0.1);} /* Green & Bigger for your thesis */
-        
-        .card h2 { font-size: 18px; color: #333; margin-bottom: 10px; }
-        .card p.desc { font-size: 12px; color: #666; margin-bottom: 20px; height: 40px; }
-        
-        /* Simulation UI */
-        .status-box { height: 60px; background: #eee; border-radius: 4px; display: flex; justify-content: center; align-items: center; font-weight: bold; font-size: 14px; margin-bottom: 20px; color: #333; }
-        .status-box.blocked { background: #dc3545; color: white; }
-        .status-box.allowed { background: #28a745; color: white; }
-        .status-box.warning { background: #ffc107; color: black; }
+        .page { max-width: 1180px; margin: 0 auto; padding: 28px 32px 48px; }
+        .hero h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -0.02em; }
+        .lede { margin: 0; max-width: 78ch; color: var(--text-secondary); font-size: 15px; }
+        .provenance { margin: 10px 0 0; font-size: 12.5px; color: var(--text-muted); }
+        .provenance.is-missing { color: var(--warn); background: var(--warn-bg); border: 1px solid #f8d9ae; border-radius: 8px; padding: 10px 14px; }
+
+        .panel { margin-top: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04); }
+        .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; padding: 20px 24px 12px; }
+        .panel-head h2 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
+        .panel-head p { margin: 4px 0 0; max-width: 76ch; color: var(--text-secondary); font-size: 13.5px; }
+        .panel-body { padding: 0 24px 24px; }
+
+        /* ---- Trade-off ---- */
+        .tradeoff { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 24px; padding: 0 24px 24px; align-items: start; }
+        .chart-figure { margin: 0; position: relative; }
+        .chart-box svg { display: block; width: 100%; height: auto; }
+        .chart-figure figcaption { margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+        .chart-tooltip { position: absolute; z-index: 2; pointer-events: none; min-width: 220px; max-width: 280px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12); font-size: 12.5px; }
+        .chart-tooltip[hidden] { display: none; }
+        .chart-tooltip .tip-title { font-weight: 700; margin-bottom: 4px; }
+        .chart-tooltip .tip-row { display: flex; justify-content: space-between; gap: 12px; color: var(--text-secondary); }
+        .chart-tooltip .tip-row strong { color: var(--text); font-variant-numeric: tabular-nums; }
+        .chart-tooltip .tip-sub { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line-soft); color: var(--text-muted); }
+        .algorithm-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+        .algorithm-list li { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
+        .algorithm-list li.is-ours { border-color: #e7c4c4; background: #fdf7f7; }
+        .algorithm-name { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+        .swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .ours-tag { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--color-primary); background: var(--color-primary-soft); border-radius: 999px; padding: 1px 8px; }
+        .algorithm-summary { margin: 4px 0 6px; font-size: 12.5px; color: var(--text-secondary); }
+        .algorithm-totals { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-secondary); }
+        .algorithm-totals strong { color: var(--text); }
+
+        /* Chart marks and chrome: hairline grid, recessive axes, text in
+           text tokens - only the data points carry color. */
+        .viz-grid { stroke: var(--grid); stroke-width: 1; }
+        .viz-axis { stroke: var(--axis); stroke-width: 1; }
+        .viz-tick { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+        .viz-title { fill: var(--text-secondary); font-size: 12px; }
+        .viz-better { fill: var(--text-muted); font-size: 11.5px; font-style: italic; }
+        .viz-point { stroke: var(--surface); stroke-width: 2; }
+        .viz-point--weva { fill: var(--mark-weva); }
+        .viz-point--baseline { fill: var(--mark-baseline); }
+        .viz-label { fill: var(--text); font-size: 12.5px; font-weight: 700; }
+        .viz-label-sub { fill: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+        .viz-hit { fill: transparent; cursor: pointer; outline: none; }
+        .viz-hit:hover, .viz-hit:focus-visible { fill: rgba(139, 0, 0, 0.06); stroke: var(--color-primary); stroke-width: 1.5; }
+        .lane-track { fill: #f7f8fa; }
+        .lane-row-label { fill: var(--text-muted); font-size: 12px; }
+        .lane-cursor { stroke: var(--text-secondary); stroke-width: 1.5; }
+        .mark-fail { fill: var(--mark-fail); stroke: var(--surface); stroke-width: 1; }
+        .mark-ok { fill: var(--mark-ok); }
+
+        /* ---- Results matrix ---- */
+        .table-wrap { overflow-x: auto; }
+        table.matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .matrix th, .matrix td { padding: 12px 14px; border-top: 1px solid var(--line-soft); text-align: left; vertical-align: top; }
+        .matrix thead th { border-top: none; background: #f9fafb; color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+        .matrix th:first-child, .matrix td:first-child { padding-left: 24px; }
+        .matrix tbody th { font-weight: 600; min-width: 220px; }
+        .scenario-tests { display: block; font-weight: 400; font-size: 12px; color: var(--text-muted); }
+        .replay-link { margin-top: 6px; padding: 0; border: none; background: none; color: var(--color-primary); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+        .replay-link:hover { text-decoration: underline; }
+        .cell-main { display: block; font-weight: 600; font-variant-numeric: tabular-nums; }
+        .cell-sub { display: block; font-size: 12px; color: var(--text-muted); }
+        .matrix td.is-best { background: var(--good-bg); }
+        .matrix td.is-worst { background: var(--bad-bg); }
+        .cell-flag { display: inline-block; margin-left: 6px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+        .is-best .cell-flag { color: var(--good); }
+        .is-worst .cell-flag { color: var(--bad); }
+
+        /* ---- Replay ---- */
+        .replay-controls { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+        .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+        select, .btn { height: 38px; padding: 0 12px; border: 1px solid #d3d6dc; border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; font-size: 13.5px; }
+        select:focus-visible, .btn:focus-visible, .replay-link:focus-visible { outline: none; box-shadow: 0 0 0 4px rgba(139, 0, 0, 0.15); border-color: var(--color-primary); }
+        .btn { font-weight: 600; cursor: pointer; }
+        .btn:hover { background: #f6f7f9; }
+        .btn-primary { background: var(--color-primary); border-color: var(--color-primary); color: #fff; min-width: 84px; }
+        .btn-primary:hover { background: #6f0000; }
+        .replay-meta { display: flex; gap: 16px; flex-wrap: wrap; padding: 0 24px 10px; font-size: 12.5px; color: var(--text-muted); }
+        .replay-meta strong { color: var(--text); font-variant-numeric: tabular-nums; }
+        .replay-legend { display: flex; gap: 18px; flex-wrap: wrap; padding: 0 24px 12px; font-size: 12.5px; color: var(--text-secondary); }
+        .key { display: inline-flex; align-items: center; gap: 6px; }
+        .key-fail::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--mark-fail); }
+        .key-ok::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--mark-ok); }
+        .lanes { padding: 0 24px; }
+        .lane { padding: 10px 0 12px; border-top: 1px solid var(--line-soft); }
+        .lane-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+        .lane-name { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+        .lane-counts { font-size: 12.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+        .lane-counts .fail { color: var(--bad); font-weight: 700; }
+        .lane svg { display: block; width: 100%; height: auto; }
+        .lane-final { margin: 4px 0 0; font-size: 12.5px; color: var(--text); }
+        .lane-final[hidden] { display: none; }
+        .time-axis { display: flex; justify-content: space-between; padding: 2px 24px 18px; font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+        .sweep { padding: 0 24px 24px; }
+        .sweep[hidden] { display: none; }
+        .sweep h3 { margin: 6px 0 4px; font-size: 14px; }
+        .sweep p { margin: 0 0 10px; font-size: 12.5px; color: var(--text-secondary); }
+
+        /* ---- Try it yourself ---- */
+        .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 0 24px 24px; }
+        .card { padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
+        .card.is-ours { border-color: #e7c4c4; background: #fdf7f7; }
+        .card h3 { margin: 0 0 4px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+        .card p.desc { margin: 0 0 14px; font-size: 12.5px; color: var(--text-secondary); min-height: 38px; }
+        .status-box { display: flex; align-items: center; justify-content: center; height: 54px; margin-bottom: 12px; border-radius: 10px; background: #f3f4f7; font-weight: 700; font-size: 13.5px; text-align: center; padding: 0 8px; }
+        .status-box.blocked { background: var(--bad-bg); color: var(--bad); }
+        .status-box.allowed { background: var(--good-bg); color: var(--good); }
+        .status-box.warning { background: var(--warn-bg); color: var(--warn); }
         .status-box.logged { background: #e8f1fc; color: #1f4f8a; }
+        .btn-test { width: 100%; height: 40px; border: none; border-radius: 10px; background: var(--color-primary); color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+        .btn-test:hover { background: #6f0000; }
+        .btn-test:disabled { background: #8a8f98; cursor: not-allowed; }
+        .logs { margin-top: 12px; height: 110px; overflow-y: auto; padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: 8px; background: #fafbfc; font-size: 11.5px; color: var(--text-secondary); }
+        .logs span { display: block; padding: 2px 0; border-bottom: 1px solid var(--line-soft); }
 
-        .btn-test { width: 100%; padding: 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; background-color: #800000; color: white; font-size: 14px; text-transform: uppercase; }
-        .btn-test:hover { background-color: #660000; }
-        .btn-test:disabled { background-color: #555; cursor: not-allowed; }
+        .notes { margin-top: 22px; font-size: 12.5px; color: var(--text-secondary); }
+        .notes h2 { font-size: 14px; margin: 0 0 6px; color: var(--text); }
+        .notes ul { margin: 0; padding-left: 18px; }
+        .notes li { margin: 3px 0; }
 
-        .logs { margin-top: 15px; font-size: 11px; color: #888; text-align: left; background: #fafafa; padding: 10px; border: 1px solid #eee; height: 100px; overflow-y: auto; }
-        .logs span { display: block; border-bottom: 1px solid #f0f0f0; padding: 2px 0; }
+        @media (max-width: 1100px) {
+            .tradeoff { grid-template-columns: minmax(0, 1fr); }
+        }
+        @media (max-width: 900px) {
+            .page { padding: 20px 16px 40px; }
+            .topbar { padding: 12px 16px; }
+            .cards { grid-template-columns: minmax(0, 1fr); }
+        }
     </style>
 </head>
 <body>
-
-    <div class="topbar">
-        <div class="logo">Algorithm Comparative Analysis Mode</div>
-        <div class="subtitle">System Defense Simulation</div>
-    </div>
-
-    <div class="container">
-        <h1 class="header-text">Security Mitigation Simulation</h1>
-        <p style="color: #666; margin-bottom: 40px;">Each click is one failed login attempt from the same device. Try a slow pace first, then reload the page and click as fast as you can.</p>
-
-        <div class="grid">
-            <div class="card traditional">
-                <h2>1. Traditional (3-Strike)</h2>
-                <p class="desc">Blocks the user completely after 3 failed clicks, regardless of speed.</p>
-                <div class="status-box" id="status-trad">STATUS: WAITING</div>
-                <button class="btn-test" id="btn-trad">Simulate Login Click</button>
-                <div class="logs" id="log-trad"></div>
-            </div>
-
-            <div class="card rulebased">
-                <h2>2. Rule-Based (Static Limit)</h2>
-                <p class="desc">Strictly blocks if user clicks more than 2 times in one second (False Positive Prone).</p>
-                <div class="status-box" id="status-rule">STATUS: WAITING</div>
-                <button class="btn-test" id="btn-rule">Simulate Login Click</button>
-                <div class="logs" id="log-rule"></div>
-            </div>
-
-            <div class="card agentic">
-                <h2 style="color: #28a745;">⭐ 3. WEVA (Ours)</h2>
-                <p class="desc">Runs the production formula from core/scorer.js: velocity × endpoint weight × fail-rate. Escalating, temporary.</p>
-                <div class="status-box" id="status-weva">STATUS: WAITING</div>
-                <button class="btn-test" id="btn-weva">Simulate Login Click</button>
-                <div class="logs" id="log-weva"></div>
-            </div>
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-mark" aria-hidden="true">SIS</span>
+            <div><strong>Algorithm Comparative Analysis</strong><span>WEVA against industry baselines</span></div>
         </div>
-    </div>
+        <a class="topbar-link" href="/admin">Admin console &rarr;</a>
+    </header>
+
+    <main class="page">
+        <section class="hero">
+            <h1>Does WEVA beat a static rate limit?</h1>
+            <p class="lede">Eight scenarios, four algorithms, identical simulated traffic for each. WEVA runs as its production middleware; the fixed-window baseline is the real <code>express-rate-limit</code> package. Same attackers, same students, same typos - only the algorithm changes.</p>
+            <p class="provenance" id="provenance">Loading results&hellip;</p>
+        </section>
+
+        <section class="panel" aria-labelledby="tradeoffTitle">
+            <div class="panel-head">
+                <div>
+                    <h2 id="tradeoffTitle">The trade-off</h2>
+                    <p>One point per algorithm, totalled over all eight scenarios. Lower means fewer attack requests got through; further left means fewer legitimate requests were refused. A static limit is tuned along one axis at the other's expense.</p>
+                </div>
+            </div>
+            <div class="tradeoff">
+                <figure class="chart-figure">
+                    <div class="chart-box" id="tradeoffChart"></div>
+                    <div class="chart-tooltip" id="tradeoffTooltip" role="status" hidden></div>
+                    <figcaption id="tradeoffCaption"></figcaption>
+                </figure>
+                <ul class="algorithm-list" id="algorithmList"></ul>
+            </div>
+        </section>
+
+        <section class="panel" aria-labelledby="matrixTitle">
+            <div class="panel-head">
+                <div>
+                    <h2 id="matrixTitle">Scenario by scenario</h2>
+                    <p>Lower is better in every cell. The best result in each row is marked, and the worst. Replay any scenario to watch it unfold.</p>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table class="matrix" id="resultsTable">
+                    <thead><tr><th scope="col">Scenario</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel" id="replay" aria-labelledby="replayTitle">
+            <div class="panel-head">
+                <div>
+                    <h2 id="replayTitle">Scenario replay</h2>
+                    <p id="replayDescription"></p>
+                </div>
+                <div class="replay-controls">
+                    <label class="field"><span>Scenario</span><select id="replayScenario"></select></label>
+                    <button type="button" class="btn btn-primary" id="replayPlay">Play</button>
+                    <button type="button" class="btn" id="replayRestart">Restart</button>
+                </div>
+            </div>
+            <div class="replay-meta">
+                <span>Simulated time <strong id="replayClock">0:00</strong> of <strong id="replayDuration">0:00</strong></span>
+                <span id="replayTests"></span>
+            </div>
+            <div class="replay-legend">
+                <span class="key key-fail">Failure - an attack request got through, or a legitimate request was refused</span>
+                <span class="key key-ok">Handled correctly</span>
+            </div>
+            <div class="lanes" id="replayLanes"></div>
+            <div class="time-axis" id="replayAxis" aria-hidden="true"></div>
+            <div class="sweep" id="replaySweep" hidden></div>
+        </section>
+
+        <section class="panel" aria-labelledby="tryTitle">
+            <div class="panel-head">
+                <div>
+                    <h2 id="tryTitle">Try it yourself</h2>
+                    <p>Each click is one failed login from the same device. Click slowly first, then reload the page and click as fast as you can.</p>
+                </div>
+            </div>
+            <div class="cards">
+                <div class="card">
+                    <h3>Account lockout</h3>
+                    <p class="desc">3 failed logins lock the account for 15 minutes - however slowly they came, and for the real owner too.</p>
+                    <div class="status-box" id="status-trad">STATUS: WAITING</div>
+                    <button class="btn-test" id="btn-trad">Simulate failed login</button>
+                    <div class="logs" id="log-trad"></div>
+                </div>
+                <div class="card">
+                    <h3>Fixed window (strict)</h3>
+                    <p class="desc">express-rate-limit: 5 failed logins per IP per 15-minute window, then every request is refused until the window resets.</p>
+                    <div class="status-box" id="status-fw">STATUS: WAITING</div>
+                    <button class="btn-test" id="btn-fw">Simulate failed login</button>
+                    <div class="logs" id="log-fw"></div>
+                </div>
+                <div class="card is-ours">
+                    <h3>WEVA <span class="ours-tag">Ours</span></h3>
+                    <p class="desc">The production formula from core/scorer.js: velocity &times; endpoint weight &times; fail-rate. Escalating, temporary.</p>
+                    <div class="status-box" id="status-weva">STATUS: WAITING</div>
+                    <button class="btn-test" id="btn-weva">Simulate failed login</button>
+                    <div class="logs" id="log-weva"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="notes" aria-labelledby="notesTitle">
+            <h2 id="notesTitle">How these numbers were produced</h2>
+            <ul id="methodNotes">
+                <li>Generated by <code>npm run bench:compare</code> (bench/). Every algorithm faces the same seeded traffic in simulated time; no database or network is involved.</li>
+                <li>Legitimate users behave like people: they retype a mistyped password, and retry a refusal after the wait the server asks for - unless it asks for more than two minutes, or refuses them three times, in which case they give up and count as denied.</li>
+                <li>Decision cost is the guard's own time per request, in memory. In production, WEVA's cost is dominated by its database reads and audit writes - see the k6 load-test results for end-to-end latency.</li>
+            </ul>
+        </section>
+    </main>
 
     <!-- A module script: it imports WEVA's production scoring function from
-         /weva/scorer.js (served by server.js), so open this page through the
-         Express server, not as a local file. -->
+         /weva/scorer.js (served by server.js) and reads the comparison
+         results from /data/weva-comparison.json, so open this page through
+         the Express server, not as a local file. -->
     <script type="module" src="compare.js"></script>
 </body>
 </html>

@@ -22,8 +22,8 @@ import { MemoryStateStore } from "./stateStore.js";
  *      attack, keep refusing the whole campus for as long as anyone there
  *      kept trying to log in, since every new attempt would keep it alive.
  *      With a 30 s memory the address recovers on its own once the attack
- *      stops, while a bot that keeps going keeps its own window full and
- *      stays blocked.
+ *      stops, while a bot that keeps going keeps refilling its own window
+ *      and keeps being throttled.
  *
  *   2. It has no velocity term: the scorer is handed requestRate 0, so only
  *      the velocity floor and the fail-rate factor apply. Velocity is judged
@@ -31,18 +31,30 @@ import { MemoryStateStore } from "./stateStore.js";
  *      combined request rate of everyone behind a NAT describes nobody, and
  *      would throttle a busy campus simply for being busy.
  *
+ *   3. It records only attempts that reach the password check
+ *      (middleware/securityMiddleware.js decides, before calling
+ *      recordAttempt()). A device records every attempt, refused or not;
+ *      an IP must not, because on a shared address the refused attempts are
+ *      mostly other people's. Recording them turned four coincidental typos
+ *      on a campus NAT into a self-sustaining lockout of the whole campus -
+ *      see the note at the end of the middleware's synchronous step.
+ *
  * Worked example - a bot on one IP sending a new device ID with every guess
  * at POST /api/login (weight 2). Every guess's device score is 0, so the IP
- * decides, with score = 2 x 2 x (1 + 0.5 x recent attempts) x 5:
+ * decides, with score = 2 x 2 x (1 + 0.5 x failures in the window) x 5:
  *
- *   attempt   recent attempts before it   IP score   verdict
- *   1         0                           0          ALLOW    - reaches the password check
- *   2-4       1-3                         30-50      LOG      - reach the password check
- *   5-7       4-6                         60-80      THROTTLE
- *   8         7                           90         BLOCK    - the IP is blocked for 60 s
+ *   attempt   failures in the window   IP score   verdict
+ *   1         0                        0          ALLOW    - reaches the password check
+ *   2-4       1-3                      30-50      LOG      - reach the password check
+ *   5 on      4                        60         THROTTLE - refused, and not recorded
  *
- * That is exactly the ladder a single device gets - rotating IDs buys the
- * attacker nothing.
+ * The window holds those 4 failures until each is 30 s old, so every
+ * further guess is refused until the oldest ages out; then one more gets
+ * through and is throttled again behind it. A bot rotating device IDs
+ * therefore gets at most 4 password checks in any 30 s. That matches a
+ * single device up to its THROTTLE, but the IP layer stops there: a device,
+ * which records every attempt, climbs on to BLOCK at its 8th (core/scorer.js);
+ * an IP never blocks.
  *
  * Each attempt is stored with the account it targeted, and a successful
  * login settles only that account's attempts (settleIpAttempts() below,
@@ -62,16 +74,23 @@ import { MemoryStateStore } from "./stateStore.js";
  *     starts at 0 - the same outcome as clearing the whole window.
  *   - A bot rotating device IDs guesses at account V while students log in
  *     around it. Each success settles only that student's own attempts;
- *     the bot's attempts at V stay in the window, so it still climbs the
- *     4 / 3 / BLOCK ladder above.
+ *     the bot's attempts at V stay in the window, so it is still throttled
+ *     after 4 guesses, as above.
  *
- * The trade-off that remains, stated plainly: unsettled failures belong to
- * the address, so while a bot behind a shared IP keeps its window full, a
- * legitimate first attempt from that same IP is scored against the bot's
- * failures too, and an IP-level BLOCK refuses everyone behind the address
- * for its 60 s. That is inherent to scoring a shared identifier; the
- * alternative - answering an IP-level verdict with a challenge such as a
- * CAPTCHA rather than a refusal - is future work.
+ * The trade-offs that remain, stated plainly:
+ *
+ *   - Unsettled failures belong to the address. While a bot behind a shared
+ *     IP keeps its window at 4, a legitimate attempt from that same IP is
+ *     throttled too - until the bot's failures age out, at most 30 s after
+ *     it stops. That is inherent to scoring a shared identifier;
+ *     answering an IP-level verdict with a challenge such as a CAPTCHA,
+ *     rather than a refusal, is future work.
+ *   - A busy enough campus can still trip the IP layer on its own: with
+ *     enough students behind one address, 4 typos can fall inside one 30 s
+ *     window, and the next student is throttled (asked to retry in 15 s).
+ *     In the comparison harness (bench/, scenario 6), 400 students signing
+ *     in within 5 minutes lose 7 of themselves that way and 800 lose 325 -
+ *     the measured breaking point.
  */
 const store = new MemoryStateStore();
 
@@ -98,6 +117,9 @@ export function countRecentAttempts(ip) {
 }
 
 /**
+ * Records an attempt from `ip` - only one that is going on to the password
+ * check, never one WEVA refused (this file's @fileoverview, point 3).
+ *
  * @param {string} ip
  * @param {string} [account=""] - Normalized account the attempt targets (middleware/clientIdentity.js#readTargetAccount).
  * @returns {void}

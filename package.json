@@ -11,7 +11,8 @@
     "start": "node server.js",
     "dev": "start http://localhost:3000 & nodemon server.js",
     "test": "vitest run",
-    "seed:bulk": "node prisma/seed-bulk.js"
+    "seed:bulk": "node prisma/seed-bulk.js",
+    "bench:compare": "vitest run --config bench/vitest.config.js"
   },
   "keywords": [
     "security",
@@ -26,13 +27,13 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "express-rate-limit": "^8.3.1",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^9.1.1"
   },
   "devDependencies": {
     "@faker-js/faker": "^10.6.0",
+    "express-rate-limit": "^8.3.1",
     "nodemon": "^3.1.14",
     "prisma": "^6.19.3",
     "vitest": "^5.0.0"

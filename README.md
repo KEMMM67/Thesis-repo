@@ -15,7 +15,7 @@
 
 The **Agentic Runtime Application Security Framework** is a self-contained runtime application self-protection (RASP) layer that sits in front of a Student Information System and defends it while it runs — not before deployment, and not by inspecting logs after the fact. Instead of relying on static rule sets or binary allow/deny lists, the framework builds a **behavioral profile** for every user session in real time, scores each incoming request against that profile using an exponential moving average (EMA), and only escalates to mitigation when a request pattern crosses a statistically meaningful threshold.
 
-This design is deliberate: legitimate traffic is bursty. A registrar uploading grades for an entire section, or a student refreshing a dashboard during enrollment week, should never be mistaken for an attacker. The framework's **bounded decision logic** exists specifically to separate genuine behavioral anomalies — brute-force login attempts, credential stuffing, denial-of-service floods — from ordinary spikes in legitimate usage, so mitigation is only ever triggered on actual attack patterns.
+This design is deliberate: legitimate traffic is bursty. A registrar uploading grades for an entire section, or a student refreshing a dashboard during enrollment week, should never be mistaken for an attacker. The framework's **bounded decision logic** exists specifically to separate genuine behavioral anomalies — brute-force login attempts, credential stuffing, denial-of-service floods — from ordinary spikes in legitimate usage, and the comparison benchmark (`npm run bench:compare`) measures how far that holds: 400 students signing in through one campus IP within 5 minutes lose 7 sign-ins to throttling, where the strict fixed-window baseline loses 379.
 
 The framework is the security core of a full-stack Student Information System, but it is architected to be portable: the detection and mitigation engine has no knowledge of Express, PostgreSQL, or Prisma. It communicates with the rest of the application exclusively through defined ports, which is what makes it an *agentic, pluggable* defense layer rather than a bolt-on middleware script.
 
@@ -60,13 +60,13 @@ This separation means the detection algorithm can be tested, reasoned about, and
 
 - **Behavioral Profiling Engine** — Builds a rolling per-user/per-session profile of request behavior and updates it continuously using an exponential moving average, weighting recent activity more heavily than historical noise.
 - **Real-Time Attack Detection** — Flags brute-force login attempts, DoS floods, and distributed DDoS-style traffic patterns as they happen, without batch processing or offline log analysis.
-- **Bounded Decision Logic** — A decision engine (`core/decisionEngine.js`) that gates mitigation behind confidence thresholds, ensuring legitimate traffic spikes (e.g., bulk grade uploads, enrollment-period logins) are never misclassified as attacks.
+- **Bounded Decision Logic** — A decision engine (`core/decisionEngine.js`) that gates mitigation behind confidence thresholds, so legitimate traffic spikes (e.g., bulk grade uploads, enrollment-period logins) are not mistaken for attacks — within measured limits: one campus IP absorbs about 400 sign-ins in 5 minutes before throttling becomes noticeable (see `/compare.html`).
 - **Graduated Mitigation** — Configurable response tiers (suspicious → critical → block) with time-boxed throttling, rather than a blunt permanent ban.
 - **Hexagonal Architecture** — Ports-and-adapters design that keeps the security core fully decoupled from Express.js and Prisma/PostgreSQL, enabling isolated testing and framework portability.
 - **Cryptographically Secure OTP** — One-time passwords generated with a CSPRNG (`crypto.randomInt`/`crypto.randomBytes`), never `Math.random()`.
 - **Constant-Time Secret Comparison** — Uses `crypto.timingSafeEqual` for OTP and token verification to eliminate timing side-channel attacks.
 - **Encryption at Rest** — Sensitive fields are encrypted with **AES-256-GCM**, providing both confidentiality and authenticated integrity for data stored in PostgreSQL.
-- **Defense-in-Depth Middleware** — Rate limiting, HTTP security headers (via Helmet), CORS policy enforcement, and optional IP allowlisting for administrative access.
+- **Defense-in-Depth Middleware** — HTTP security headers (via Helmet), CORS policy enforcement, and optional IP allowlisting for administrative access, around WEVA's own behavioral rate control. (`express-rate-limit` is a dev dependency only: the static baseline WEVA is benchmarked against.)
 
 ## Tech Stack
 
@@ -144,6 +144,14 @@ npm run dev
 ```bash
 npm test
 ```
+
+### Comparing WEVA with Baselines
+
+```bash
+npm run bench:compare
+```
+
+Runs eight attack and false-positive scenarios against WEVA, `express-rate-limit` (strict and lenient fixed windows) and a 3-strike account lockout, in simulated time and entirely in memory — no database is touched (see `bench/`). Results are written to `public/data/weva-comparison.json` and shown at `/compare.html`. `npm test` includes `bench/harness.test.js`, which checks the simulation reproduces WEVA's documented behavior.
 
 ## Author
 

@@ -130,9 +130,11 @@ function scoredEndpoint(req) {
  *
  * Learning. Each identity's baseline learns from a request only if that
  * identity's own verdict was ALLOW or LOG (LEARNABLE_VERDICTS). Throttled
- * and blocked traffic is still recorded - it still counts toward velocity
- * and attempts - but it never becomes the "normal" future requests are
- * judged against.
+ * and blocked traffic is still recorded on the device and the account - it
+ * still counts toward velocity and attempts - but it never becomes the
+ * "normal" future requests are judged against. The IP's attempt window is
+ * the exception: it records only attempts that reach the password check
+ * (see the end of the synchronous step for why).
  *
  * The behavioral state getFeatures()/getBaseline() read and write here -
  * per-identity request history, login-attempt ledgers, and EMA baselines -
@@ -223,19 +225,43 @@ export function createSecurityMiddleware({ auditSink, ipTrackingStore, identityR
 
         updateFeatures(deviceKey, endpoint, account);
         if (userKey) updateFeatures(userKey, endpoint, account);
-        if (scoreIp) recordAttempt(ip, account);
 
         for (const identity of identities) {
             if (identity.features && LEARNABLE_VERDICTS.has(decideAction(identity.result.score, role, decisionConfig))) {
                 updateBaseline(identity.key, identity.features);
             }
         }
-        // ---- End of the synchronous step. ----
 
         // Highest score decides; ties go to the earliest entry - the device.
         const deciding = identities.reduce((best, candidate) => (candidate.result.score > best.result.score ? candidate : best));
         const { score, breakdown } = deciding.result;
         const decision = decideAction(score, role, decisionConfig);
+
+        // The IP's attempt window (core/ipAttempts.js) records an attempt
+        // only if this verdict lets it through to the password check. A
+        // refused attempt tests no password, so it is no evidence of
+        // guessing - and counting it locked whole campuses out. Everyone
+        // behind a campus NAT shares one window: four unrelated typos inside
+        // 30 s throttled the next student, that refused attempt was recorded
+        // as a fifth failure, the next as a sixth, until the IP was BLOCKed;
+        // and every student arriving during the 60 s block was recorded too,
+        // so the window was full again the moment the block lifted. In the
+        // comparison harness (bench/, scenario 6), 400 students signing in
+        // over 5 minutes lost 254 of themselves that way; counting only
+        // attempts that reach the password check, 7.
+        //
+        // The cost: the window never holds more than the 4 attempts that
+        // bring it to THROTTLE, so the IP layer throttles but no longer
+        // blocks. A bot rotating device IDs on one address gets at most 4
+        // password checks in any 30 s, rather than 4 and then a 60 s block.
+        // The device and account layers are unchanged: they record every
+        // attempt, refused or not, and still block.
+        //
+        // Inside the synchronous step, like the recording above, so
+        // simultaneous rotating-ID guesses each see the ones before them.
+        if (scoreIp && LEARNABLE_VERDICTS.has(decision)) recordAttempt(ip, account);
+        // ---- End of the synchronous step. ----
+
         const deviceScore = identities[0].result.score;
 
         if (identities.length > 1) {
