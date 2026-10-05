@@ -1,4 +1,4 @@
-import { randomBytes, createCipheriv, createDecipheriv } from "crypto";
+import { randomBytes, createCipheriv, createDecipheriv, hkdfSync } from "crypto";
 
 /**
  * @fileoverview AES-256-GCM field-level encryption, applied transparently
@@ -84,6 +84,22 @@ function loadKey() {
 }
 
 const KEY = loadKey();
+
+/**
+ * Derives a separate 32-byte key for another purpose from
+ * FIELD_ENCRYPTION_KEY, with HKDF-SHA256 (RFC 5869), instead of reusing the
+ * encryption key itself. Each `purpose` label yields an unrelated key, and
+ * none of them reveals the master key or each other - so, for example, the
+ * audit trail's HMAC key (utils/auditTrail.js) is independent of the key
+ * that encrypts grades, with no second secret to configure and keep in sync
+ * across Render and every local .env.
+ *
+ * @param {string} purpose - Fixed label naming what the key is for, e.g. "audit-chain-v1".
+ * @returns {Buffer} 32-byte derived key.
+ */
+export function deriveKey(purpose) {
+    return Buffer.from(hkdfSync("sha256", KEY, Buffer.alloc(0), `sis:${purpose}`, 32));
+}
 
 /**
  * Encrypts one value into the "iv:authTag:ciphertext" envelope described

@@ -253,10 +253,17 @@ export function createSecurityMiddleware({ auditSink, ipTrackingStore, identityR
         // cleanly-styled pieces without a fragile regex (see fetchLogs()).
         // The "Device <key> triggered" wording is also what server.js's
         // unblock route searches for to find a blocked device's last user.
+        //
+        // "on <METHOD> <endpoint>" names what was requested - the route
+        // pattern the endpoint weight in the formula came from. Without it,
+        // a log entry said a device scored 45 but not on what, so a 3x
+        // DELETE and a 3x PUT on the same record read identically. It sits
+        // after the verdict, so readVerdict()'s fixed position is unchanged.
+        const target = `${req.method} ${endpoint}`;
         const narrative = {
-            device: `Device ${deviceKey} triggered ${decision}`,
-            ip: `IP ${ip} triggered ${decision} (recent login attempts from any device; device ${deviceKey} alone scored ${deviceScore})`,
-            account: `Account ${user} triggered ${decision} (requests from every device signed in to it; device ${deviceKey} alone scored ${deviceScore})`
+            device: `Device ${deviceKey} triggered ${decision} on ${target}`,
+            ip: `IP ${ip} triggered ${decision} on ${target} (recent login attempts from any device; device ${deviceKey} alone scored ${deviceScore})`,
+            account: `Account ${user} triggered ${decision} on ${target} (requests from every device signed in to it; device ${deviceKey} alone scored ${deviceScore})`
         }[deciding.kind];
         const reasonText = `${narrative} | ${breakdown.formula}`;
 

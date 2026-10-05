@@ -15,11 +15,12 @@ import { resolveTrustProxy } from "./config/trustProxy.js";
 import { describeDatabaseUrl } from "./config/databaseUrl.js";
 import { PrismaAuditSink, PrismaIpTrackingStore, PrismaIdentityResolver } from "./adapters/prisma/index.js";
 import { createWeva } from "./core/weva.js";
-import { parseAccountKey } from "./middleware/clientIdentity.js";
+import { parseAccountKey, getClientIdentity } from "./middleware/clientIdentity.js";
 import { readVerdict } from "./middleware/securityMiddleware.js";
 import { summarizeGrades } from "./utils/gradeSummary.js";
 import { GRADE_SCALE, parseGrade, parseShortText } from "./utils/gradeScale.js";
 import { streamDatabaseExport } from "./utils/databaseExport.js";
+import { withAudit, recordAudit, verifyAuditChain, readAuditDetail, diffFields } from "./utils/auditTrail.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -149,27 +150,6 @@ app.get('/weva/scorer.js', (req, res) => {
 app.use(express.static(PUBLIC_DIR, { index: false }));
 
 /**
- * Formats a Date as `YYYY-MM-DD HH12:MI:SS AM`, matching the legacy
- * `TO_CHAR(log_time, 'YYYY-MM-DD HH12:MI:SS AM')` output format expected
- * by the admin dashboard's log views.
- *
- * @param {Date} date - Date to format.
- * @returns {string} Formatted timestamp.
- */
-function formatLogTime(date) {
-    const pad = (n) => String(n).padStart(2, '0');
-    const year = date.getFullYear();
-    const month = pad(date.getMonth() + 1);
-    const day = pad(date.getDate());
-    let hours = date.getHours();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12 || 12;
-    const minutes = pad(date.getMinutes());
-    const seconds = pad(date.getSeconds());
-    return `${year}-${month}-${day} ${pad(hours)}:${minutes}:${seconds} ${ampm}`;
-}
-
-/**
  * Reads a search box's text from a query parameter. Anything other than a
  * single string (e.g. `?q=a&q=b`, which arrives as an array) counts as no
  * search, and the length is capped: no student ID, name or subject title
@@ -214,6 +194,125 @@ function intParam(value, fallback, min, max) {
     return Number.isNaN(parsed) ? fallback : Math.min(Math.max(parsed, min), max);
 }
 
+/**
+ * Reads a date-range filter from `from`/`to` query parameters: ISO 8601
+ * instants, which the dashboard computes as the start and end of the chosen
+ * days in the administrator's own time zone (the server's is UTC on
+ * Render, so it cannot know where a "day" begins). A bound that is missing
+ * or not a valid date is ignored.
+ *
+ * @param {*} from - Raw `req.query.from`.
+ * @param {*} to - Raw `req.query.to`.
+ * @returns {{gte?: Date, lte?: Date}|null} A Prisma DateTime filter, or null for no range.
+ */
+function dateRange(from, to) {
+    const parse = (value) => {
+        if (typeof value !== 'string' || value.length > 40) return null;
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? null : date;
+    };
+    const range = {};
+    const start = parse(from);
+    const end = parse(to);
+    if (start) range.gte = start;
+    if (end) range.lte = end;
+    return start || end ? range : null;
+}
+
+// ---------------------------------------------------------------------
+// AUDIT TRAIL HELPERS (see utils/auditTrail.js)
+// ---------------------------------------------------------------------
+// Every admin route that changes something records it in the audit trail:
+// a change that reached the database is recorded atomically with it
+// (withAudit), and an attempt the database refused or that failed - a 404,
+// a 409, a 500 - is recorded on its own (auditFailure). Two kinds of
+// request are left out on purpose: one rejected by input validation (400)
+// before any record was looked up, since nothing was attempted, and one
+// WEVA blocked, which never reached the handler. Both are still in the
+// Security Events log, which records every scored request.
+
+/** The fields the audit trail records for each kind of record - never passwords, hashes or tokens. */
+const STUDENT_AUDIT_FIELDS = ['studentId', 'fullName', 'department', 'program', 'yearLevel', 'status'];
+const SUBJECT_AUDIT_FIELDS = ['subjectCode', 'subjectTitle', 'units', 'department'];
+const GRADE_AUDIT_FIELDS = ['term', 'grade', 'remarks'];
+
+/** entityType values the Audit Trail can be filtered by - every kind of record auditEntry() is called with below. */
+const AUDIT_ENTITY_TYPES = ['Student', 'Subject', 'Grade', 'AdminAccount', 'WevaBlock', 'Database'];
+
+/**
+ * The who/what/where of an audit entry. The administrator comes from the
+ * verified JWT and its Session row (req.user/req.auth, set by
+ * authMiddleware), and the IP and device ID are the same identities WEVA
+ * scores (middleware/clientIdentity.js) - nothing here comes from the
+ * request body.
+ *
+ * @param {import("express").Request} req
+ * @param {string} action - e.g. "STUDENT_UPDATE".
+ * @param {string} entityType - One of AUDIT_ENTITY_TYPES.
+ * @param {*} entityId - The record's human-readable key; truncated to the column's 150 characters, since a failed lookup records whatever ID was requested.
+ * @returns {object} The fields utils/auditTrail.js needs, minus outcome and detail.
+ */
+function auditEntry(req, action, entityType, entityId) {
+    const { ip, deviceId } = getClientIdentity(req);
+    return {
+        actorUserId: req.auth?.userId ?? null,
+        actorEmail: req.user.email,
+        actorRole: req.user.role,
+        action,
+        entityType,
+        entityId: String(entityId ?? '').slice(0, 150),
+        ipAddress: ip,
+        deviceId
+    };
+}
+
+/**
+ * Records an attempt that was refused or failed. Best-effort and never
+ * throws - see utils/auditTrail.js#recordAudit.
+ *
+ * @param {object} entry - From auditEntry().
+ * @param {number} statusCode - The status the administrator received.
+ * @param {string} note - Why it did not go through.
+ * @returns {Promise<void>}
+ */
+function auditFailure(entry, statusCode, note) {
+    return recordAudit(prisma, { ...entry, outcome: 'FAILURE', statusCode, detail: { note } });
+}
+
+/**
+ * Whether `err` is Postgres refusing to delete a row other rows still
+ * reference - here, a student or subject that still has grades.
+ *
+ * The grade foreign keys are ON DELETE RESTRICT, which Postgres reports as
+ * SQLSTATE 23001 (restrict_violation), not 23503 (foreign_key_violation).
+ * Prisma maps only 23503 to its P2003 code; 23001 arrives as an unknown
+ * request error with no code at all, carrying the SQLSTATE only in its
+ * message. So the delete routes' P2003 checks never matched, and removing a
+ * student with grades answered 500 instead of 409 (found when the audit
+ * trail recorded that 500; reproduced on Prisma 6.19 with PostgreSQL 18).
+ * Both forms are checked.
+ *
+ * @param {*} err
+ * @returns {boolean}
+ */
+function isStillReferenced(err) {
+    return err?.code === 'P2003' || /code: "23001"/.test(String(err?.message));
+}
+
+/**
+ * A grade's audit key: its student, subject and term - the grade's own
+ * natural key (prisma/schema.prisma: @@unique([studentId, subjectId, term])),
+ * so the trail can be searched by student ID.
+ *
+ * @param {string} studentId - e.g. "A23-00001".
+ * @param {string} subjectCode - e.g. "SE301".
+ * @param {string|null} term
+ * @returns {string} e.g. "A23-00001 · SE301 · 1st Sem 2025-2026".
+ */
+function gradeKey(studentId, subjectCode, term) {
+    return [studentId, subjectCode, term].filter(Boolean).join(' · ');
+}
+
 // ---------------------------------------------------------------------
 // WEVA WIRING
 // ---------------------------------------------------------------------
@@ -244,36 +343,177 @@ const ipWhitelistMiddleware = weva.ipWhitelistMiddleware();
 // best-effort login-alert email).
 app.use("/api", weva.authRoutes());
 
+/** The behavior_logs event types whose description carries a WEVA verdict (see readVerdict). */
+const VERDICT_EVENT_TYPES = ['SECURITY_EVALUATION', 'NETWORK_ACCESS_DENIED'];
+const VERDICTS = ['ALLOW', 'LOG', 'THROTTLE', 'BLOCK'];
+
 /**
  * @route GET /api/admin/logs
  * @access Admin
- * @description Returns the 50 most recent behavior log entries for the
- * Admin Monitoring Dashboard. Each WEVA evaluation carries its `verdict`
- * (ALLOW/LOG/THROTTLE/BLOCK, else null) as its own field, read from the
- * one position the server writes it - so the dashboard colors a row by
+ * @description One page of the Security Events log (behavior_logs),
+ * newest first, for the dashboard's Security & Logs section.
+ *
+ * Query parameters, all optional:
+ *   - type: one event type, e.g. SECURITY_EVALUATION or LOGIN_FAILED.
+ *   - verdict: ALLOW, LOG, THROTTLE or BLOCK.
+ *   - q: text matched against the account email and the description, which
+ *     names the device, IP or account WEVA scored and the endpoint it hit.
+ *   - from / to: ISO 8601 instants bounding the event time (see dateRange()).
+ *   - limit: rows per page, 1-200 (default 50); offset: rows to skip.
+ *
+ * Each WEVA evaluation carries its `verdict` as its own field, read from
+ * the one position the server writes it - so the dashboard colors a row by
  * that field, never by searching the description, part of which is the
  * client-chosen device ID (see middleware/securityMiddleware.js#readVerdict).
+ * The verdict *filter* relies on the same fixed position: it matches
+ * " triggered <VERDICT> ", which in a verdict-bearing description occurs
+ * only right after the scored key - a key cannot contain a space, so
+ * nothing in front of it can fake the sequence, and the trailing space
+ * keeps LOG from matching LOGIN.
+ *
+ * Times are sent as ISO 8601 instants and formatted by the browser, in the
+ * administrator's own time zone. They used to be formatted here, in the
+ * server's - UTC on Render, so an attack blocked at 10:15 AM in Manila was
+ * listed at 02:15 AM.
  */
 app.get("/api/admin/logs", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
-    try {
-        const logs = await prisma.behaviorLog.findMany({
-            orderBy: { logTime: 'desc' },
-            take: 50
+    const type = searchParam(req.query.type);
+    const verdict = VERDICTS.includes(req.query.verdict) ? req.query.verdict : null;
+    const q = searchParam(req.query.q);
+    const logTime = dateRange(req.query.from, req.query.to);
+    const limit = intParam(req.query.limit, 50, 1, 200);
+    const offset = intParam(req.query.offset, 0, 0, 2 ** 31 - 1);
+
+    const conditions = [];
+    if (type) conditions.push({ eventType: type });
+    if (verdict) conditions.push({ eventType: { in: VERDICT_EVENT_TYPES } }, { description: { contains: ` triggered ${verdict} ` } });
+    if (q) {
+        conditions.push({
+            OR: ['userEmail', 'description'].map(field => ({ [field]: { contains: escapeLike(q), mode: 'insensitive' } }))
         });
+    }
+    if (logTime) conditions.push({ logTime });
+    const where = conditions.length ? { AND: conditions } : {};
 
-        const formattedLogs = logs.map(log => ({
-            id: log.id,
-            user_email: log.userEmail,
-            event_type: log.eventType,
-            verdict: readVerdict(log.description),
-            description: log.description,
-            formatted_time: formatLogTime(log.logTime)
-        }));
+    try {
+        const [logs, total] = await Promise.all([
+            prisma.behaviorLog.findMany({ where, orderBy: [{ logTime: 'desc' }, { id: 'desc' }], skip: offset, take: limit }),
+            prisma.behaviorLog.count({ where })
+        ]);
 
-        res.json({ success: true, logs: formattedLogs });
+        res.json({
+            success: true,
+            logs: logs.map(log => ({
+                id: log.id,
+                user_email: log.userEmail,
+                event_type: log.eventType,
+                verdict: readVerdict(log.description),
+                description: log.description,
+                logged_at: log.logTime.toISOString()
+            })),
+            total,
+            offset,
+            limit
+        });
     } catch (err) {
         console.error("Dashboard DB Error:", err);
         res.status(500).json({ success: false, message: "Cannot fetch logs." });
+    }
+});
+
+/**
+ * @route GET /api/admin/audit
+ * @access Admin
+ * @description One page of the administrative audit trail (audit_logs -
+ * see utils/auditTrail.js), newest first.
+ *
+ * Query parameters, all optional:
+ *   - entity: one of AUDIT_ENTITY_TYPES, e.g. Grade.
+ *   - outcome: SUCCESS or FAILURE.
+ *   - q: text matched against the administrator's email and the record's
+ *     key - a student ID finds every change to that student and to their
+ *     grades (a grade's key starts with its student ID; see gradeKey()).
+ *   - from / to, limit, offset: as GET /api/admin/logs.
+ *
+ * Each entry's encrypted `detail` is decrypted for display. `detailReadable:
+ * false` means the ciphertext failed AES-GCM authentication, i.e. it was
+ * altered; the dashboard says so instead of showing an empty change list.
+ * `hash` is the entry's seal, shown so a printed report records it.
+ *
+ * Scored by WEVA at 2x, like GET /api/admin/logs: it exposes the record of
+ * every change made to the system.
+ */
+app.get("/api/admin/audit", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+    const entity = AUDIT_ENTITY_TYPES.includes(req.query.entity) ? req.query.entity : null;
+    const outcome = ['SUCCESS', 'FAILURE'].includes(req.query.outcome) ? req.query.outcome : null;
+    const q = searchParam(req.query.q);
+    const occurredAt = dateRange(req.query.from, req.query.to);
+    const limit = intParam(req.query.limit, 50, 1, 200);
+    const offset = intParam(req.query.offset, 0, 0, 2 ** 31 - 1);
+
+    const conditions = [];
+    if (entity) conditions.push({ entityType: entity });
+    if (outcome) conditions.push({ outcome });
+    if (q) {
+        conditions.push({
+            OR: ['actorEmail', 'entityId'].map(field => ({ [field]: { contains: escapeLike(q), mode: 'insensitive' } }))
+        });
+    }
+    if (occurredAt) conditions.push({ occurredAt });
+    const where = conditions.length ? { AND: conditions } : {};
+
+    try {
+        const [rows, total] = await Promise.all([
+            prisma.auditLog.findMany({ where, orderBy: { id: 'desc' }, skip: offset, take: limit }),
+            prisma.auditLog.count({ where })
+        ]);
+
+        res.json({
+            success: true,
+            entries: rows.map(row => {
+                const { detail, readable } = readAuditDetail(row.detail);
+                return {
+                    id: row.id,
+                    occurredAt: row.occurredAt.toISOString(),
+                    actorEmail: row.actorEmail,
+                    actorRole: row.actorRole,
+                    action: row.action,
+                    entityType: row.entityType,
+                    entityId: row.entityId,
+                    outcome: row.outcome,
+                    statusCode: row.statusCode,
+                    ipAddress: row.ipAddress,
+                    deviceId: row.deviceId,
+                    detail,
+                    detailReadable: readable,
+                    hash: row.hash
+                };
+            }),
+            total,
+            offset,
+            limit
+        });
+    } catch (err) {
+        console.error("Audit trail fetch error:", err);
+        res.status(500).json({ success: false, message: "Cannot fetch the audit trail." });
+    }
+});
+
+/**
+ * @route GET /api/admin/audit/verify
+ * @access Admin
+ * @description Recomputes the seal of every audit entry, oldest first,
+ * and reports whether the chain is intact - or the first entry where it
+ * breaks, and why (utils/auditTrail.js#verifyAuditChain). Read-only; safe
+ * to run at any time. Scored by WEVA at 2x like the trail itself.
+ */
+app.get("/api/admin/audit/verify", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
+    try {
+        const result = await verifyAuditChain(prisma);
+        res.json({ success: true, ...result, verifiedAt: new Date().toISOString() });
+    } catch (err) {
+        console.error("Audit chain verification error:", err);
+        res.status(500).json({ success: false, message: "Could not verify the audit trail." });
     }
 });
 
@@ -433,29 +673,41 @@ app.post("/api/admin/blocked-devices/unblock", ipWhitelistMiddleware, authMiddle
         return res.status(400).json({ success: false, message: "identifier must be a non-empty string." });
     }
 
+    const audit = auditEntry(req, 'BLOCK_LIFT', 'WevaBlock', identifier);
+    const accountId = parseAccountKey(identifier);
+    const unblocked = accountId == null ? 'Device' : 'Account';
+
     try {
-        await prisma.ipTracking.updateMany({
-            where: { ipAddress: identifier },
-            data: { isBlocked: false, blockedUntil: null }
+        // Lifting the block, revoking the sessions and the audit entry
+        // commit together: a block can never be lifted without a record of
+        // who lifted it.
+        const sessionsRevoked = await withAudit(prisma, audit, async (tx) => {
+            const lifted = await tx.ipTracking.updateMany({
+                where: { ipAddress: identifier },
+                data: { isBlocked: false, blockedUntil: null }
+            });
+
+            let userIdToRevoke = accountId;
+            if (userIdToRevoke == null) {
+                const recentActivity = await tx.behaviorLog.findFirst({
+                    where: { description: { contains: `Device ${identifier} ` } },
+                    orderBy: { logTime: 'desc' }
+                });
+                userIdToRevoke = recentActivity?.userId ?? null;
+            }
+
+            let revoked = 0;
+            if (userIdToRevoke != null) {
+                const deleted = await tx.session.deleteMany({ where: { userId: userIdToRevoke } });
+                revoked = deleted.count;
+            }
+
+            const note = lifted.count === 0
+                ? `${unblocked} had no block on record; ${revoked} active session(s) revoked.`
+                : `${unblocked} block lifted early; ${revoked} active session(s) revoked.`;
+            return { result: revoked, detail: { note } };
         });
 
-        const accountId = parseAccountKey(identifier);
-        let userIdToRevoke = accountId;
-        if (userIdToRevoke == null) {
-            const recentActivity = await prisma.behaviorLog.findFirst({
-                where: { description: { contains: `Device ${identifier} ` } },
-                orderBy: { logTime: 'desc' }
-            });
-            userIdToRevoke = recentActivity?.userId ?? null;
-        }
-
-        let sessionsRevoked = 0;
-        if (userIdToRevoke != null) {
-            const deleted = await prisma.session.deleteMany({ where: { userId: userIdToRevoke } });
-            sessionsRevoked = deleted.count;
-        }
-
-        const unblocked = accountId == null ? 'Device' : 'Account';
         res.json({
             success: true,
             message: sessionsRevoked > 0
@@ -464,6 +716,7 @@ app.post("/api/admin/blocked-devices/unblock", ipWhitelistMiddleware, authMiddle
         });
     } catch (err) {
         console.error("Unblock/revoke error:", err);
+        await auditFailure(audit, 500, 'The block could not be lifted.');
         res.status(500).json({ success: false, message: "Cannot unblock device." });
     }
 });
@@ -487,10 +740,16 @@ app.post("/api/admin/blocked-devices/unblock", ipWhitelistMiddleware, authMiddle
  * error response. The connection is aborted instead, so the browser
  * reports a failed download rather than saving a truncated file that
  * looks complete.
+ *
+ * Every export is recorded in the audit trail (DATA_EXPORT) once it has
+ * finished or failed - a copy of every student record leaving the system
+ * is exactly what an auditor asks about first. It is recorded on its own,
+ * not atomically: the export only reads, so there is nothing to roll back.
  */
 app.get("/api/admin/backup", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const generatedAt = new Date();
     const filename = `sis_snapshot_${generatedAt.toISOString().replace(/[:.]/g, '-')}.json`;
+    const audit = auditEntry(req, 'DATA_EXPORT', 'Database', filename);
     res.set({
         'Content-Type': 'application/json; charset=utf-8',
         'Content-Disposition': `attachment; filename="${filename}"`,
@@ -500,8 +759,10 @@ app.get("/api/admin/backup", ipWhitelistMiddleware, authMiddleware, requireRole(
     try {
         await streamDatabaseExport(prisma, res, { generatedBy: req.user.email, generatedAt });
         res.end();
+        await recordAudit(prisma, { ...audit, outcome: 'SUCCESS', statusCode: 200, detail: { note: 'Full JSON snapshot downloaded.' } });
     } catch (err) {
         console.error("Database snapshot export error:", err);
+        await auditFailure(audit, 500, 'The snapshot export failed before it finished; no complete file was delivered.');
         if (!res.headersSent) {
             res.removeHeader('Content-Disposition');
             return res.status(500).json({ success: false, message: "Snapshot export failed." });
@@ -681,16 +942,22 @@ app.post("/api/students", ipWhitelistMiddleware, authMiddleware, requireRole('ad
         return res.status(400).json({ success: false, message: "studentId and fullName are required." });
     }
 
+    const audit = auditEntry(req, 'STUDENT_CREATE', 'Student', studentId);
     try {
-        const student = await prisma.student.create({
-            data: { studentId, fullName, department, program, yearLevel, status: status || 'ENROLLED' }
+        const student = await withAudit(prisma, { ...audit, statusCode: 201 }, async (tx) => {
+            const created = await tx.student.create({
+                data: { studentId, fullName, department, program, yearLevel, status: status || 'ENROLLED' }
+            });
+            return { result: created, detail: { changes: diffFields(null, created, STUDENT_AUDIT_FIELDS) } };
         });
         res.status(201).json({ success: true, message: `Student ${studentId} created.`, student, submittedBy: req.user.email });
     } catch (err) {
         if (err.code === 'P2002') {
+            await auditFailure(audit, 409, 'A student with this ID already exists.');
             return res.status(409).json({ success: false, message: `Student ID ${studentId} already exists.` });
         }
         console.error("Student creation error:", err);
+        await auditFailure(audit, 500, 'The student could not be created.');
         res.status(500).json({ success: false, message: "Could not create student." });
     }
 });
@@ -707,17 +974,24 @@ app.put("/api/students/:id", ipWhitelistMiddleware, authMiddleware, requireRole(
     const { id } = req.params;
     const { fullName, department, program, yearLevel, status } = req.body || {};
 
+    const audit = auditEntry(req, 'STUDENT_UPDATE', 'Student', id);
     try {
-        const student = await prisma.student.update({
-            where: { studentId: id },
-            data: { fullName, department, program, yearLevel, status }
+        const student = await withAudit(prisma, audit, async (tx) => {
+            const before = await tx.student.findUnique({ where: { studentId: id } });
+            const after = await tx.student.update({
+                where: { studentId: id },
+                data: { fullName, department, program, yearLevel, status }
+            });
+            return { result: after, detail: { changes: diffFields(before, after, STUDENT_AUDIT_FIELDS) } };
         });
         res.json({ success: true, message: `Student ${id} updated.`, student, submittedBy: req.user.email });
     } catch (err) {
         if (err.code === 'P2025') {
+            await auditFailure(audit, 404, 'No student with this ID exists.');
             return res.status(404).json({ success: false, message: `Student ${id} not found.` });
         }
         console.error("Student update error:", err);
+        await auditFailure(audit, 500, 'The student could not be updated.');
         res.status(500).json({ success: false, message: "Could not update student." });
     }
 });
@@ -730,17 +1004,26 @@ app.put("/api/students/:id", ipWhitelistMiddleware, authMiddleware, requireRole(
 app.delete("/api/students/:id", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
 
+    const audit = auditEntry(req, 'STUDENT_DELETE', 'Student', id);
     try {
-        await prisma.student.delete({ where: { studentId: id } });
+        // The removed record is kept in the entry, field by field - after
+        // this, the audit trail is the only place it still exists.
+        await withAudit(prisma, audit, async (tx) => {
+            const removed = await tx.student.delete({ where: { studentId: id } });
+            return { result: removed, detail: { changes: diffFields(removed, null, STUDENT_AUDIT_FIELDS) } };
+        });
         res.json({ success: true, message: `Student ${id} removed.`, submittedBy: req.user.email });
     } catch (err) {
         if (err.code === 'P2025') {
+            await auditFailure(audit, 404, 'No student with this ID exists.');
             return res.status(404).json({ success: false, message: `Student ${id} not found.` });
         }
-        if (err.code === 'P2003') {
+        if (isStillReferenced(err)) {
+            await auditFailure(audit, 409, 'Refused: the student still has grade records.');
             return res.status(409).json({ success: false, message: `Cannot remove ${id}: this student still has grade records.` });
         }
         console.error("Student deletion error:", err);
+        await auditFailure(audit, 500, 'The student could not be removed.');
         res.status(500).json({ success: false, message: "Could not remove student." });
     }
 });
@@ -788,16 +1071,22 @@ app.post("/api/subjects", ipWhitelistMiddleware, authMiddleware, requireRole('ad
         return res.status(400).json({ success: false, message: "subjectCode and subjectTitle are required." });
     }
 
+    const audit = auditEntry(req, 'SUBJECT_CREATE', 'Subject', subjectCode);
     try {
-        const subject = await prisma.subject.create({
-            data: { subjectCode, subjectTitle, units: units ? Number(units) : undefined, department }
+        const subject = await withAudit(prisma, { ...audit, statusCode: 201 }, async (tx) => {
+            const created = await tx.subject.create({
+                data: { subjectCode, subjectTitle, units: units ? Number(units) : undefined, department }
+            });
+            return { result: created, detail: { changes: diffFields(null, created, SUBJECT_AUDIT_FIELDS) } };
         });
         res.status(201).json({ success: true, message: `Subject ${subjectCode} created.`, subject, submittedBy: req.user.email });
     } catch (err) {
         if (err.code === 'P2002') {
+            await auditFailure(audit, 409, 'A subject with this code already exists.');
             return res.status(409).json({ success: false, message: `Subject code ${subjectCode} already exists.` });
         }
         console.error("Subject creation error:", err);
+        await auditFailure(audit, 500, 'The subject could not be created.');
         res.status(500).json({ success: false, message: "Could not create subject." });
     }
 });
@@ -812,17 +1101,24 @@ app.put("/api/subjects/:id", ipWhitelistMiddleware, authMiddleware, requireRole(
     const { id } = req.params;
     const { subjectTitle, units, department } = req.body || {};
 
+    const audit = auditEntry(req, 'SUBJECT_UPDATE', 'Subject', id);
     try {
-        const subject = await prisma.subject.update({
-            where: { subjectCode: id },
-            data: { subjectTitle, units: units ? Number(units) : undefined, department }
+        const subject = await withAudit(prisma, audit, async (tx) => {
+            const before = await tx.subject.findUnique({ where: { subjectCode: id } });
+            const after = await tx.subject.update({
+                where: { subjectCode: id },
+                data: { subjectTitle, units: units ? Number(units) : undefined, department }
+            });
+            return { result: after, detail: { changes: diffFields(before, after, SUBJECT_AUDIT_FIELDS) } };
         });
         res.json({ success: true, message: `Subject ${id} updated.`, subject, submittedBy: req.user.email });
     } catch (err) {
         if (err.code === 'P2025') {
+            await auditFailure(audit, 404, 'No subject with this code exists.');
             return res.status(404).json({ success: false, message: `Subject ${id} not found.` });
         }
         console.error("Subject update error:", err);
+        await auditFailure(audit, 500, 'The subject could not be updated.');
         res.status(500).json({ success: false, message: "Could not update subject." });
     }
 });
@@ -835,17 +1131,24 @@ app.put("/api/subjects/:id", ipWhitelistMiddleware, authMiddleware, requireRole(
 app.delete("/api/subjects/:id", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     const { id } = req.params;
 
+    const audit = auditEntry(req, 'SUBJECT_DELETE', 'Subject', id);
     try {
-        await prisma.subject.delete({ where: { subjectCode: id } });
+        await withAudit(prisma, audit, async (tx) => {
+            const removed = await tx.subject.delete({ where: { subjectCode: id } });
+            return { result: removed, detail: { changes: diffFields(removed, null, SUBJECT_AUDIT_FIELDS) } };
+        });
         res.json({ success: true, message: `Subject ${id} removed.`, submittedBy: req.user.email });
     } catch (err) {
         if (err.code === 'P2025') {
+            await auditFailure(audit, 404, 'No subject with this code exists.');
             return res.status(404).json({ success: false, message: `Subject ${id} not found.` });
         }
-        if (err.code === 'P2003') {
+        if (isStillReferenced(err)) {
+            await auditFailure(audit, 409, 'Refused: the subject still has grade records.');
             return res.status(409).json({ success: false, message: `Cannot remove ${id}: this subject still has grade records.` });
         }
         console.error("Subject deletion error:", err);
+        await auditFailure(audit, 500, 'The subject could not be removed.');
         res.status(500).json({ success: false, message: "Could not remove subject." });
     }
 });
@@ -958,21 +1261,37 @@ app.post("/api/grades", ipWhitelistMiddleware, authMiddleware, requireRole('admi
         return res.status(400).json({ success: false, message: "term and remarks must be text of at most 50 characters." });
     }
 
+    const audit = auditEntry(req, 'GRADE_CREATE', 'Grade', gradeKey(studentId, subjectCode, term.value));
     try {
         const student = await prisma.student.findUnique({ where: { studentId } });
         const subject = await prisma.subject.findUnique({ where: { subjectCode } });
-        if (!student) return res.status(404).json({ success: false, message: `Student ${studentId} not found.` });
-        if (!subject) return res.status(404).json({ success: false, message: `Subject ${subjectCode} not found.` });
+        if (!student) {
+            await auditFailure(audit, 404, 'No student with this ID exists.');
+            return res.status(404).json({ success: false, message: `Student ${studentId} not found.` });
+        }
+        if (!subject) {
+            await auditFailure(audit, 404, 'No subject with this code exists.');
+            return res.status(404).json({ success: false, message: `Subject ${subjectCode} not found.` });
+        }
 
-        const created = await prisma.grade.create({
-            data: { studentId: student.id, subjectId: subject.id, term: term.value, grade: grade.value, remarks: remarks.value }
+        const created = await withAudit(prisma, { ...audit, statusCode: 201 }, async (tx) => {
+            const row = await tx.grade.create({
+                data: { studentId: student.id, subjectId: subject.id, term: term.value, grade: grade.value, remarks: remarks.value }
+            });
+            return {
+                result: row,
+                entityId: gradeKey(student.studentId, subject.subjectCode, row.term),
+                detail: { changes: diffFields(null, row, GRADE_AUDIT_FIELDS) }
+            };
         });
         res.status(201).json({ success: true, message: `Grade recorded for ${studentId} in ${subjectCode}.`, grade: created });
     } catch (err) {
         if (err.code === 'P2002') {
+            await auditFailure(audit, 409, 'A grade for this student, subject and term already exists.');
             return res.status(409).json({ success: false, message: "A grade for this student, subject, and term already exists." });
         }
         console.error("Grade creation error:", err);
+        await auditFailure(audit, 500, 'The grade could not be recorded.');
         res.status(500).json({ success: false, message: "Could not record grade." });
     }
 });
@@ -993,17 +1312,31 @@ app.put("/api/grades/:id", ipWhitelistMiddleware, authMiddleware, requireRole('a
     const remarks = parseShortText(req.body?.remarks);
     if (!remarks.ok) return res.status(400).json({ success: false, message: "remarks must be text of at most 50 characters." });
 
+    const audit = auditEntry(req, 'GRADE_UPDATE', 'Grade', `Grade #${gradeId}`);
     try {
-        const updated = await prisma.grade.update({
-            where: { id: gradeId },
-            data: { grade: grade.value, remarks: remarks.value }
+        // The case an SIS audit trail exists for: a grade changed after the
+        // fact. The entry keeps the old and new grade - encrypted, like the
+        // grade itself (see utils/auditTrail.js).
+        const updated = await withAudit(prisma, audit, async (tx) => {
+            const before = await tx.grade.findUnique({ where: { id: gradeId }, include: { student: true, subject: true } });
+            const after = await tx.grade.update({
+                where: { id: gradeId },
+                data: { grade: grade.value, remarks: remarks.value }
+            });
+            return {
+                result: after,
+                entityId: gradeKey(before.student.studentId, before.subject.subjectCode, before.term),
+                detail: { changes: diffFields(before, after, GRADE_AUDIT_FIELDS) }
+            };
         });
         res.json({ success: true, message: `Grade ${id} updated.`, grade: updated });
     } catch (err) {
         if (err.code === 'P2025') {
+            await auditFailure(audit, 404, 'No grade with this id exists.');
             return res.status(404).json({ success: false, message: `Grade ${id} not found.` });
         }
         console.error("Grade update error:", err);
+        await auditFailure(audit, 500, 'The grade could not be updated.');
         res.status(500).json({ success: false, message: "Could not update grade." });
     }
 });
@@ -1018,14 +1351,24 @@ app.delete("/api/grades/:id", ipWhitelistMiddleware, authMiddleware, requireRole
     const gradeId = recordId(id);
     if (gradeId == null) return res.status(400).json({ success: false, message: "Grade id must be a positive integer." });
 
+    const audit = auditEntry(req, 'GRADE_DELETE', 'Grade', `Grade #${gradeId}`);
     try {
-        await prisma.grade.delete({ where: { id: gradeId } });
+        await withAudit(prisma, audit, async (tx) => {
+            const removed = await tx.grade.delete({ where: { id: gradeId }, include: { student: true, subject: true } });
+            return {
+                result: removed,
+                entityId: gradeKey(removed.student.studentId, removed.subject.subjectCode, removed.term),
+                detail: { changes: diffFields(removed, null, GRADE_AUDIT_FIELDS) }
+            };
+        });
         res.json({ success: true, message: `Grade ${id} removed.` });
     } catch (err) {
         if (err.code === 'P2025') {
+            await auditFailure(audit, 404, 'No grade with this id exists.');
             return res.status(404).json({ success: false, message: `Grade ${id} not found.` });
         }
         console.error("Grade deletion error:", err);
+        await auditFailure(audit, 500, 'The grade could not be removed.');
         res.status(500).json({ success: false, message: "Could not remove grade." });
     }
 });
@@ -1054,14 +1397,23 @@ app.post("/api/admin/accounts", ipWhitelistMiddleware, authMiddleware, requireRo
         return res.status(400).json({ success: false, message: "Password must be at least 8 characters." });
     }
 
+    // Records the new account's email and role - never the password, or
+    // its hash.
+    const audit = auditEntry(req, 'ADMIN_CREATE', 'AdminAccount', email);
     try {
         const existing = await prisma.user.findUnique({ where: { email } });
         if (existing) {
+            await auditFailure(audit, 409, 'An account with this email already exists.');
             return res.status(409).json({ success: false, message: `An account with email ${email} already exists.` });
         }
 
+        // Hashed before the transaction opens: bcrypt is deliberately slow,
+        // and a transaction should not sit open waiting on it.
         const passwordHash = await bcrypt.hash(password, 10);
-        const newAdmin = await prisma.user.create({ data: { email, passwordHash, role: 'admin' } });
+        const newAdmin = await withAudit(prisma, { ...audit, statusCode: 201 }, async (tx) => {
+            const created = await tx.user.create({ data: { email, passwordHash, role: 'admin' } });
+            return { result: created, detail: { changes: diffFields(null, created, ['email', 'role']) } };
+        });
 
         res.status(201).json({
             success: true,
@@ -1071,6 +1423,7 @@ app.post("/api/admin/accounts", ipWhitelistMiddleware, authMiddleware, requireRo
         });
     } catch (err) {
         console.error("Admin account creation error:", err);
+        await auditFailure(audit, 500, 'The admin account could not be created.');
         res.status(500).json({ success: false, message: "Could not create admin account." });
     }
 });
@@ -1085,6 +1438,12 @@ app.post("/api/admin/accounts", ipWhitelistMiddleware, authMiddleware, requireRo
  */
 app.post("/api/settings/backup", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     // TODO: shell out to `pg_dump` (or a managed backup provider).
+    // Recorded as what it is today: a request, with nothing performed.
+    await recordAudit(prisma, {
+        ...auditEntry(req, 'BACKUP_REQUEST', 'Database', 'engine backup'),
+        outcome: 'SUCCESS', statusCode: 200,
+        detail: { note: 'Request received. Placeholder - no backup was performed.' }
+    });
     res.json({
         success: true,
         message: "Database backup request received (placeholder - no backup has actually been triggered).",
@@ -1103,6 +1462,11 @@ app.post("/api/settings/backup", ipWhitelistMiddleware, authMiddleware, requireR
  */
 app.post("/api/settings/restore", ipWhitelistMiddleware, authMiddleware, requireRole('admin'), securityMiddleware, async (req, res) => {
     // TODO: implement restore (e.g. `pg_restore` against a selected snapshot).
+    await recordAudit(prisma, {
+        ...auditEntry(req, 'RESTORE_REQUEST', 'Database', 'engine restore'),
+        outcome: 'SUCCESS', statusCode: 200,
+        detail: { note: 'Request received. Placeholder - no restore was performed.' }
+    });
     res.json({
         success: true,
         message: "Database restore request received (placeholder - no restore has actually been triggered).",

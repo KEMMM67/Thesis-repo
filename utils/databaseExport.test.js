@@ -29,6 +29,7 @@ function fakeDb(tables) {
         securityAction: fakeModel(tables.securityActions ?? []),
         behaviorLog: fakeModel(tables.behaviorLogs ?? []),
         ipTracking: fakeModel(tables.ipTracking ?? []),
+        auditLog: fakeModel(tables.auditLogs ?? []),
         rawSql: [],
         transactionOptions: [],
         async $queryRaw(strings, afterId, take) {
@@ -84,7 +85,7 @@ describe('streamDatabaseExport', () => {
         expect(snapshot.ipTracking).toEqual([]);
         expect(Object.keys(snapshot)).toEqual([
             'format', 'generatedAt', 'generatedBy', 'consistency', 'encryption',
-            'users', 'students', 'subjects', 'grades', 'loginAttempts', 'anomalyScores', 'securityActions', 'behaviorLogs', 'ipTracking'
+            'users', 'students', 'subjects', 'grades', 'loginAttempts', 'anomalyScores', 'securityActions', 'behaviorLogs', 'ipTracking', 'auditLogs'
         ]);
     });
 

@@ -8,6 +8,12 @@
 // sent back to the Admin Portal login immediately rather than being
 // left looking at dashboard chrome.
 //
+// The session lives under the Admin Portal's own localStorage keys,
+// written by public/admin_login.js. Both portals share one origin, so
+// one localStorage; under the shared keys they used to have, a student
+// signing in on another tab replaced this token, and every request below
+// then failed the admin role check.
+//
 // This is defense-in-depth / UX only, not the real security
 // boundary: every /api/* route this dashboard calls independently
 // requires authMiddleware server-side (see middleware/authMiddleware.js
@@ -16,7 +22,9 @@
 // below, which already redirects on a 401 for the same reason. A
 // missing token is therefore rejected here before the rest of this
 // file - including that redundant 401 path - ever runs.
-if (!localStorage.getItem('authToken')) {
+const ADMIN_SESSION = { token: 'sis.admin.token', email: 'sis.admin.email' };
+
+if (!localStorage.getItem(ADMIN_SESSION.token)) {
     window.location.replace('admin_login.html');
 } else {
     console.log('[admin_dashboard] Script parsed. Waiting for DOMContentLoaded...');
@@ -176,14 +184,32 @@ if (!localStorage.getItem('authToken')) {
     }
 
     /**
+     * Shows a 403 from the campus-network gate
+     * (middleware/ipWhitelistMiddleware.js) for what it is: not a WEVA
+     * verdict, and not temporary. It lasts for as long as this network is
+     * missing from ALLOWED_ADMIN_IPS, so it gets no countdown - a "resumes
+     * in 60s" banner would promise something that never happens.
+     *
+     * @param {string} message - The server's own explanation.
+     * @returns {void}
+     */
+    function showNetworkDeniedBanner(message) {
+        if (rateLimitTimer) clearInterval(rateLimitTimer);
+        rateLimitTimer = null;
+        rateLimitBanner.className = 'rate-limit-banner rate-limit-banner--danger';
+        rateLimitBanner.hidden = false;
+        rateLimitBanner.textContent = `🌐 ${message} This network is not on the admin allowlist.`;
+    }
+
+    /**
      * Clears the stored session and redirects to the Admin Portal login
      * page. Used on missing/expired sessions and manual logout.
      *
      * @returns {void}
      */
     function goToLogin() {
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('userEmail');
+        localStorage.removeItem(ADMIN_SESSION.token);
+        localStorage.removeItem(ADMIN_SESSION.email);
         window.location.href = 'admin_login.html';
     }
 
@@ -199,7 +225,7 @@ if (!localStorage.getItem('authToken')) {
      * @returns {Promise<void>}
      */
     async function logout() {
-        const token = localStorage.getItem('authToken');
+        const token = localStorage.getItem(ADMIN_SESSION.token);
         if (token) {
             try {
                 await fetch(`${API_BASE}/api/logout`, {
@@ -233,7 +259,23 @@ if (!localStorage.getItem('authToken')) {
      * showRateLimitBanner() above) as a side effect, centrally, for every
      * caller - fetchLogs(), submitAction()-based mutations, the Simulate
      * Attack burst, all of it - rather than each call site having to
-     * remember to show it individually. The response body is read via
+     * remember to show it individually.
+     *
+     * Three different things answer 403, and each is told apart by its
+     * body rather than lumped together as a lockout:
+     *
+     *   - WEVA's BLOCK (core/mitigation.js) carries retryAfterSeconds:
+     *     temporary, so the banner counts down.
+     *   - The campus-network gate (middleware/ipWhitelistMiddleware.js)
+     *     carries error: "Network Access Denied": lasts until the network
+     *     is allowed, so its banner has no countdown.
+     *   - The role check (middleware/authMiddleware.js#requireRole) carries
+     *     neither: the token is valid but not an administrator's. That is a
+     *     session problem, not a lockout - showing it as "blocked, resumes
+     *     in 60s" (as this used to) left the dashboard counting down to a
+     *     retry that would fail the same way forever - so it signs out.
+     *
+     * The response body is read via
      * .clone() (and awaited here, not fire-and-forget) so the banner's
      * text/countdown is guaranteed current by the time this function
      * returns, while the original, unconsumed Response still flows back to
@@ -247,7 +289,7 @@ if (!localStorage.getItem('authToken')) {
      * @returns {Promise<Response>}
      */
     async function authFetch(path, options = {}) {
-        const token = localStorage.getItem('authToken');
+        const token = localStorage.getItem(ADMIN_SESSION.token);
 
         if (!token) {
             goToLogin();
@@ -271,15 +313,23 @@ if (!localStorage.getItem('authToken')) {
         }
 
         if (response.status === 403 || response.status === 429) {
+            let data = null;
             try {
-                const data = await response.clone().json();
-                if (response.status === 403) {
-                    showRateLimitBanner('danger', data.message || 'Device temporarily blocked.', data.retryAfterSeconds || 60);
-                } else {
-                    showRateLimitBanner('warning', data.message || 'Too many attempts.', data.retryAfter || 15);
-                }
+                data = await response.clone().json();
             } catch (err) {
                 console.error('[admin_dashboard] Could not parse rate-limit response body:', err);
+            }
+
+            if (response.status === 429) {
+                showRateLimitBanner('warning', data?.message || 'Too many attempts.', data?.retryAfter || 15);
+            } else if (data?.error === 'Network Access Denied') {
+                showNetworkDeniedBanner(data.message || 'Admin portal can only be accessed from the Campus Intranet.');
+            } else if (data && data.retryAfterSeconds === undefined) {
+                console.warn('[admin_dashboard] 403 without a WEVA verdict - this session is not an admin session. Signing out.');
+                goToLogin();
+                return new Promise(() => {});
+            } else {
+                showRateLimitBanner('danger', data?.message || 'Device temporarily blocked.', data?.retryAfterSeconds || 60);
             }
         }
 
@@ -367,44 +417,349 @@ if (!localStorage.getItem('authToken')) {
     const EVENT_BADGES = { LOGIN_SUCCESS: 'bg-success', LOGIN_FAILED: 'bg-warning' };
 
     /**
-     * Fetches and renders the Security Logs table. Declared at top level
-     * so both the sidebar navigation handler and the refresh button can
-     * call it.
+     * Formats an ISO 8601 instant from the server in this browser's own
+     * time zone, as `YYYY-MM-DD hh:mm:ss AM` - the format the log views
+     * have always used. The server sends instants rather than formatted
+     * text because its clock is UTC on Render: formatting there listed an
+     * attack blocked at 10:15 AM in Manila at 02:15 AM.
+     *
+     * @param {string} iso
+     * @returns {string}
+     */
+    function formatTimestamp(iso) {
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return '';
+        const pad = (n) => String(n).padStart(2, '0');
+        const hours = date.getHours();
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+            + `${pad(hours % 12 || 12)}:${pad(date.getMinutes())}:${pad(date.getSeconds())} ${hours >= 12 ? 'PM' : 'AM'}`;
+    }
+
+    /**
+     * Converts a date input's value ("YYYY-MM-DD") to the ISO instant at
+     * the start - or the last millisecond - of that day in this browser's
+     * time zone, for the server's `from`/`to` filters. Parsed by hand:
+     * new Date("YYYY-MM-DD") reads it as midnight UTC, which is 8:00 AM in
+     * Manila, and would cut the first eight hours off the chosen day.
+     *
+     * @param {string} value - A date input's value.
+     * @param {boolean} endOfDay
+     * @returns {string} ISO 8601 instant, or '' for no date.
+     */
+    function dayBound(value, endOfDay) {
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+        if (!match) return '';
+        const [year, month, day] = match.slice(1).map(Number);
+        const date = endOfDay ? new Date(year, month - 1, day, 23, 59, 59, 999) : new Date(year, month - 1, day);
+        return date.toISOString();
+    }
+
+    /**
+     * Updates a log panel's footer ("Showing 1-50 of 1,234 events") and
+     * whether Newer/Older lead anywhere. Shared by Security Events and the
+     * Audit Trail, which both page newest-first.
+     *
+     * @param {{count: string, prev: string, next: string}} ids - Element ids.
+     * @param {{offset: number, total: number}} view
+     * @param {number} shown - Rows on the current page.
+     * @param {[string, string]} nouns - Singular and plural, e.g. ["entry", "entries"].
+     * @param {boolean} filtered - Whether any filter is narrowing the list.
+     * @returns {void}
+     */
+    function renderLogPager(ids, view, shown, nouns, filtered) {
+        const count = document.getElementById(ids.count);
+        const prev = document.getElementById(ids.prev);
+        const next = document.getElementById(ids.next);
+        const matching = filtered ? ' matching these filters' : '';
+        const noun = (n) => (n === 1 ? nouns[0] : nouns[1]);
+
+        if (count) {
+            count.innerHTML = shown === 0
+                ? `<strong>0</strong> ${noun(0)}${matching}`
+                : `Showing <strong>${formatCount(view.offset + 1)}&ndash;${formatCount(view.offset + shown)}</strong> of <strong>${formatCount(view.total)}</strong> ${noun(view.total)}${matching}`;
+        }
+        if (prev) prev.disabled = view.offset === 0;
+        if (next) next.disabled = view.offset + shown >= view.total;
+    }
+
+    /**
+     * Adds a filter view's date range to its query, as the start and end of
+     * the chosen days in this browser's time zone (see dayBound()).
+     *
+     * @param {URLSearchParams} params
+     * @param {{from: string, to: string}} view
+     * @returns {URLSearchParams}
+     */
+    function withDateRange(params, view) {
+        if (view.from) params.set('from', dayBound(view.from, false));
+        if (view.to) params.set('to', dayBound(view.to, true));
+        return params;
+    }
+
+    // ---- Security Events (GET /api/admin/logs) ----
+    // The current page and filters, kept here so leaving the section and
+    // coming back - or refreshing - reloads the same view.
+    const LOG_PAGE_SIZE = 50;
+    const LOG_PAGER = { count: 'logsCount', prev: 'btnLogsPrev', next: 'btnLogsNext' };
+    const logView = { type: '', verdict: '', q: '', from: '', to: '', offset: 0, total: 0, shown: 0 };
+    let logRequestSeq = 0;
+
+    /** Event types whose rows carry a WEVA verdict - the only ones the verdict filter can match. */
+    const VERDICT_EVENT_TYPES = ['SECURITY_EVALUATION', 'NETWORK_ACCESS_DENIED'];
+
+    /** @returns {boolean} Whether any Security Events filter is set. */
+    function hasLogFilters() {
+        return Boolean(logView.type || logView.verdict || logView.q || logView.from || logView.to);
+    }
+
+    /**
+     * Fetches and renders the current page of the Security Events table
+     * (see logView above). Declared at top level so the sidebar handler,
+     * the filters and the refresh button can all call it. As in
+     * loadStudents(), a response that is no longer the latest request's is
+     * dropped, so fast filter changes cannot leave stale rows on screen.
      *
      * @returns {Promise<void>}
      */
     async function fetchLogs() {
         const tableBody = document.getElementById('logsTableBody');
+        if (!tableBody) return;
+        const seq = ++logRequestSeq;
+        const params = withDateRange(new URLSearchParams({ limit: LOG_PAGE_SIZE, offset: logView.offset }), logView);
+        for (const key of ['type', 'verdict', 'q']) {
+            if (logView[key]) params.set(key, logView[key]);
+        }
+
         try {
-            const response = await authFetch('/api/admin/logs');
+            const response = await authFetch(`/api/admin/logs?${params}`);
             const data = await response.json();
+            if (seq !== logRequestSeq) return;
 
             if (data.success) {
-                tableBody.innerHTML = '';
-                data.logs.forEach(log => {
-                    // Colored by structured fields only: the verdict the
-                    // server read from its own fixed position in the
-                    // narrative, else the event type. Searching the
-                    // description itself let a device named "DEV-ALLOWED"
-                    // turn its own BLOCK rows green.
-                    const badgeClass = VERDICT_BADGES[log.verdict] || EVENT_BADGES[log.event_type] || 'bg-info';
-
-                    tableBody.innerHTML += `
-                        <tr>
-                            <td style="color: #888;">${escapeHtml(log.formatted_time)}</td>
-                            <td><strong>${escapeHtml(log.user_email)}</strong></td>
-                            <td><span class="badge ${badgeClass}">${escapeHtml(log.event_type)}</span></td>
-                            <td>${renderLogDescription(log.description)}</td>
-                        </tr>
-                    `;
-                });
+                logView.total = data.total;
+                logView.shown = data.logs.length;
+                tableBody.innerHTML = data.logs.length === 0
+                    ? `<tr><td colspan="4" class="text-muted">${hasLogFilters() ? 'No security events match these filters.' : 'No security events recorded yet.'}</td></tr>`
+                    : data.logs.map(log => {
+                        // Colored by structured fields only: the verdict the
+                        // server read from its own fixed position in the
+                        // narrative, else the event type. Searching the
+                        // description itself let a device named "DEV-ALLOWED"
+                        // turn its own BLOCK rows green.
+                        const badgeClass = VERDICT_BADGES[log.verdict] || EVENT_BADGES[log.event_type] || 'bg-info';
+                        return `
+                            <tr>
+                                <td class="text-muted">${escapeHtml(formatTimestamp(log.logged_at))}</td>
+                                <td><strong>${escapeHtml(log.user_email)}</strong></td>
+                                <td><span class="badge ${badgeClass}">${escapeHtml(log.event_type)}</span></td>
+                                <td>${renderLogDescription(log.description)}</td>
+                            </tr>`;
+                    }).join('');
+                renderLogPager(LOG_PAGER, logView, data.logs.length, ['event', 'events'], hasLogFilters());
             } else {
                 tableBody.innerHTML = `<tr><td colspan="4" style="color: red;">${escapeHtml(data.message || 'Could not load logs.')}</td></tr>`;
             }
         } catch (error) {
+            if (seq !== logRequestSeq) return;
             console.error('[admin_dashboard] fetchLogs() failed:', error);
             tableBody.innerHTML = '<tr><td colspan="4" style="color: red;">Cannot connect to Database.</td></tr>';
         }
+    }
+
+    // ---- Audit Trail (GET /api/admin/audit) ----
+    const AUDIT_PAGE_SIZE = 50;
+    const AUDIT_PAGER = { count: 'auditCount', prev: 'btnAuditPrev', next: 'btnAuditNext' };
+    const auditView = { entity: '', outcome: '', q: '', from: '', to: '', offset: 0, total: 0, shown: 0 };
+    let auditRequestSeq = 0;
+
+    /**
+     * The newest integrity check's result (GET /api/admin/audit/verify),
+     * kept so every re-render can mark the entry where the chain broke and
+     * a printed report can state what was verified. null until run.
+     * @type {{intact: boolean, checked: number, headHash?: string|null, brokenAt?: number, reason?: string, verifiedAt: string}|null}
+     */
+    let lastVerification = null;
+
+    /** Label and badge for each audit action (see the routes in server.js). */
+    const AUDIT_ACTIONS = {
+        STUDENT_CREATE: ['Student added', 'bg-success'],
+        STUDENT_UPDATE: ['Student edited', 'bg-info'],
+        STUDENT_DELETE: ['Student removed', 'bg-danger'],
+        SUBJECT_CREATE: ['Subject added', 'bg-success'],
+        SUBJECT_UPDATE: ['Subject edited', 'bg-info'],
+        SUBJECT_DELETE: ['Subject removed', 'bg-danger'],
+        GRADE_CREATE: ['Grade recorded', 'bg-success'],
+        GRADE_UPDATE: ['Grade changed', 'bg-warning'],
+        GRADE_DELETE: ['Grade removed', 'bg-danger'],
+        ADMIN_CREATE: ['Admin created', 'bg-warning'],
+        BLOCK_LIFT: ['Block lifted', 'bg-warning'],
+        DATA_EXPORT: ['Data exported', 'bg-warning'],
+        BACKUP_REQUEST: ['Backup requested', 'bg-info'],
+        RESTORE_REQUEST: ['Restore requested', 'bg-warning']
+    };
+    const AUDIT_ENTITIES = { Student: 'Student', Subject: 'Subject', Grade: 'Grade', AdminAccount: 'Admin account', WevaBlock: 'WEVA block', Database: 'Database' };
+    const AUDIT_FIELDS = {
+        studentId: 'Student ID', fullName: 'Full name', department: 'Department', program: 'Program',
+        yearLevel: 'Year level', status: 'Status', subjectCode: 'Subject code', subjectTitle: 'Title',
+        units: 'Units', term: 'Term', grade: 'Grade', remarks: 'Remarks', email: 'Email', role: 'Role'
+    };
+
+    /** @returns {boolean} Whether any Audit Trail filter is set. */
+    function hasAuditFilters() {
+        return Boolean(auditView.entity || auditView.outcome || auditView.q || auditView.from || auditView.to);
+    }
+
+    /**
+     * Renders an entry's decrypted detail: each changed field as old ->
+     * new (a created record shows only new values, a removed one only old
+     * ones), then any note. Detail that failed decryption is shown as the
+     * tampering evidence it is, never as an empty change list.
+     *
+     * @param {object} entry - One GET /api/admin/audit entry.
+     * @returns {string} HTML-safe markup.
+     */
+    function renderAuditDetail(entry) {
+        if (!entry.detailReadable) {
+            return '<span class="audit-unreadable"><i class="fa-solid fa-triangle-exclamation"></i> Details failed decryption: the stored ciphertext was altered.</span>';
+        }
+        const detail = entry.detail || {};
+        const changes = Object.entries(detail.changes || {});
+        let html = '';
+        if (changes.length) {
+            html += '<ul class="audit-changes">' + changes.map(([field, { from, to }]) => {
+                const old = from === null ? '' : `<del>${escapeHtml(from)}</del>`;
+                const arrow = from !== null && to !== null ? ' <i class="fa-solid fa-arrow-right-long" aria-label="changed to"></i> ' : ' ';
+                const now = to === null ? '' : `<ins>${escapeHtml(to)}</ins>`;
+                return `<li><span class="audit-field">${escapeHtml(AUDIT_FIELDS[field] || field)}</span> ${old}${arrow}${now}</li>`;
+            }).join('') + '</ul>';
+        }
+        if (detail.note) html += `<p class="audit-note">${escapeHtml(detail.note)}</p>`;
+        return html || '<span class="text-muted">No fields changed</span>';
+    }
+
+    /**
+     * Fetches and renders the current page of the Audit Trail table (see
+     * auditView above), the same way fetchLogs() does for Security Events.
+     *
+     * @returns {Promise<void>}
+     */
+    async function loadAudit() {
+        const tableBody = document.getElementById('auditTableBody');
+        if (!tableBody) return;
+        const seq = ++auditRequestSeq;
+        const params = withDateRange(new URLSearchParams({ limit: AUDIT_PAGE_SIZE, offset: auditView.offset }), auditView);
+        for (const key of ['entity', 'outcome', 'q']) {
+            if (auditView[key]) params.set(key, auditView[key]);
+        }
+
+        try {
+            const response = await authFetch(`/api/admin/audit?${params}`);
+            const data = await response.json();
+            if (seq !== auditRequestSeq) return;
+
+            if (data.success) {
+                auditView.total = data.total;
+                auditView.shown = data.entries.length;
+                const brokenAt = lastVerification && !lastVerification.intact ? lastVerification.brokenAt : null;
+                tableBody.innerHTML = data.entries.length === 0
+                    ? `<tr><td colspan="4" class="text-muted">${hasAuditFilters() ? 'No audit entries match these filters.' : 'No administrative changes recorded yet.'}</td></tr>`
+                    : data.entries.map(entry => {
+                        const [actionLabel, actionBadge] = AUDIT_ACTIONS[entry.action] || [entry.action, 'bg-info'];
+                        const success = entry.outcome === 'SUCCESS';
+                        const origin = [entry.ipAddress, entry.deviceId].filter(Boolean).join(' · ');
+                        return `
+                            <tr class="${Number(entry.id) === brokenAt ? 'is-tampered' : ''}">
+                                <td>
+                                    <span class="audit-entry-id">#${Number(entry.id)}</span>
+                                    <span class="audit-sub">${escapeHtml(formatTimestamp(entry.occurredAt))}</span>
+                                    <code class="audit-seal">${escapeHtml(String(entry.hash).slice(0, 12))}&hellip;</code>
+                                </td>
+                                <td><strong>${escapeHtml(entry.actorEmail).replace('@', '@<wbr>')}</strong><span class="audit-sub">${escapeHtml(origin)}</span></td>
+                                <td>
+                                    <span class="badge ${actionBadge}">${escapeHtml(actionLabel)}</span>
+                                    <span class="audit-record"><span class="audit-sub">${escapeHtml(AUDIT_ENTITIES[entry.entityType] || entry.entityType)}</span><strong>${escapeHtml(entry.entityId)}</strong></span>
+                                    <span class="audit-outcome ${success ? 'audit-outcome--ok' : 'audit-outcome--failed'}">
+                                        <i class="fa-solid ${success ? 'fa-check' : 'fa-xmark'}"></i> ${success ? 'Succeeded' : 'Refused / failed'} &middot; HTTP ${Number(entry.statusCode)}
+                                    </span>
+                                </td>
+                                <td>${renderAuditDetail(entry)}</td>
+                            </tr>`;
+                    }).join('');
+                renderLogPager(AUDIT_PAGER, auditView, data.entries.length, ['entry', 'entries'], hasAuditFilters());
+            } else {
+                tableBody.innerHTML = `<tr><td colspan="4" style="color: red;">${escapeHtml(data.message || 'Could not load the audit trail.')}</td></tr>`;
+            }
+        } catch (error) {
+            if (seq !== auditRequestSeq) return;
+            console.error('[admin_dashboard] loadAudit() failed:', error);
+            tableBody.innerHTML = '<tr><td colspan="4" style="color: red;">Cannot connect to the server.</td></tr>';
+        }
+    }
+
+    /**
+     * Shows the newest integrity check's result above the Audit Trail table.
+     *
+     * @returns {void}
+     */
+    function renderIntegrityStatus() {
+        const status = document.getElementById('auditIntegrity');
+        if (!status || !lastVerification) return;
+        const result = lastVerification;
+        const when = escapeHtml(formatTimestamp(result.verifiedAt));
+
+        if (result.intact) {
+            status.className = 'integrity-status integrity-status--ok';
+            status.innerHTML = result.checked === 0
+                ? `<i class="fa-solid fa-circle-check"></i><div><strong>Nothing to verify yet.</strong> The audit trail is empty. Checked ${when}.</div>`
+                : `<i class="fa-solid fa-circle-check"></i><div><strong>Chain intact.</strong> All ${formatCount(result.checked)} entries match their HMAC seals, in order, with none missing between them. Checked ${when}.`
+                    + `<span class="integrity-head">Newest seal: <code>${escapeHtml(result.headHash)}</code></span></div>`;
+        } else {
+            status.className = 'integrity-status integrity-status--broken';
+            status.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i><div><strong>Tampering detected at entry #${Number(result.brokenAt)}.</strong> ${escapeHtml(result.reason)} `
+                + `The ${formatCount(result.checked)} entries before it verified. Checked ${when}.</div>`;
+        }
+        status.hidden = false;
+    }
+
+    /**
+     * Runs GET /api/admin/audit/verify and shows the result, then re-renders
+     * the table so the entry where the chain broke (if any) is marked.
+     *
+     * @returns {Promise<void>}
+     */
+    async function verifyAudit() {
+        const button = document.getElementById('btnVerifyAudit');
+        const idleHtml = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Verifying...';
+
+        try {
+            const response = await authFetch('/api/admin/audit/verify');
+            const data = await response.json();
+            if (data.success) {
+                lastVerification = data;
+                renderIntegrityStatus();
+                loadAudit();
+            } else if (response.status !== 403 && response.status !== 429) {
+                alert(data.message || 'Could not verify the audit trail.');
+            }
+        } catch (error) {
+            console.error('[admin_dashboard] verifyAudit() failed:', error);
+            alert('Cannot connect to the server.');
+        } finally {
+            button.disabled = false;
+            button.innerHTML = idleHtml;
+        }
+    }
+
+    // Which Security & Logs tab is showing - reopening the section, or
+    // refreshing, reloads that one.
+    let activeLogTab = 'events';
+
+    /** Loads whichever Security & Logs tab is showing. Called by the sidebar handler. */
+    function loadActiveLogTab() {
+        if (activeLogTab === 'audit') loadAudit();
+        else fetchLogs();
     }
 
     /**
@@ -537,7 +892,7 @@ if (!localStorage.getItem('authToken')) {
      * student ID lookup, where every partial ID would be a miss.
      *
      * @param {HTMLInputElement} input
-     * @param {HTMLButtonElement} button
+     * @param {HTMLButtonElement|null} button - null for a box with no Search button (the log filters search as you type).
      * @param {(text: string) => void} onSearch - Receives the trimmed box text.
      * @param {number} debounceMs
      * @returns {void}
@@ -549,7 +904,7 @@ if (!localStorage.getItem('authToken')) {
             onSearch(input.value.trim());
         };
 
-        button.addEventListener('click', run);
+        if (button) button.addEventListener('click', run);
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -835,7 +1190,7 @@ if (!localStorage.getItem('authToken')) {
             if (targetSectionId === 'section-dashboard') {
                 loadStats();
             } else if (targetSectionId === 'section-security-logs') {
-                fetchLogs();
+                loadActiveLogTab();
             } else if (targetSectionId === 'section-admin-settings') {
                 fetchBlockedDevices();
             } else if (targetSectionId === 'section-student-records') {
@@ -1140,15 +1495,122 @@ if (!localStorage.getItem('authToken')) {
     // scored request at load would sit in this device's 30-second window
     // and dilute a Simulate Attack burst made right after signing in (see
     // the DEMO MODE block above).
+    //
+    // The same holds for the Audit Trail tab and its integrity check, which
+    // are scored too. Filters search as the admin types, debounced, so a
+    // search costs one scored request per pause rather than per keystroke.
     try {
-        console.log('[admin_dashboard] Wiring security logs refresh button...');
-        const btnRefreshLogs = document.getElementById('btnRefreshLogs');
-        if (!btnRefreshLogs) throw new Error('#btnRefreshLogs not found in the DOM.');
+        console.log('[admin_dashboard] Wiring security logs and audit trail...');
+        const byId = (id) => {
+            const element = document.getElementById(id);
+            if (!element) throw new Error(`#${id} not found in the DOM.`);
+            return element;
+        };
 
-        btnRefreshLogs.addEventListener('click', fetchLogs);
-        console.log('[admin_dashboard] Security logs wired successfully.');
+        // ---- Tabs (WAI-ARIA tabs pattern: arrow keys move between them) ----
+        const tabs = { events: byId('tabSecurityEvents'), audit: byId('tabAuditTrail') };
+        const panels = { events: byId('panelSecurityEvents'), audit: byId('panelAuditTrail') };
+        const selectTab = (name) => {
+            activeLogTab = name;
+            for (const key of Object.keys(tabs)) {
+                const selected = key === name;
+                tabs[key].classList.toggle('is-active', selected);
+                tabs[key].setAttribute('aria-selected', String(selected));
+                tabs[key].tabIndex = selected ? 0 : -1;
+                panels[key].hidden = !selected;
+            }
+            loadActiveLogTab();
+        };
+        tabs.events.addEventListener('click', () => selectTab('events'));
+        tabs.audit.addEventListener('click', () => selectTab('audit'));
+        for (const tab of Object.values(tabs)) {
+            tab.addEventListener('keydown', (e) => {
+                if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+                const next = activeLogTab === 'events' ? 'audit' : 'events';
+                selectTab(next);
+                tabs[next].focus();
+            });
+        }
+
+        /**
+         * Wires one filter panel: a search box, selects and dates that each
+         * reset to the first page and reload, a Clear button, and the pager.
+         *
+         * @param {object} config
+         * @param {object} config.view - logView or auditView.
+         * @param {() => void} config.load - fetchLogs or loadAudit.
+         * @param {number} config.pageSize
+         * @param {string} config.search - Search input id.
+         * @param {Record<string, string>} config.selects - view key -> select id.
+         * @param {{from: string, to: string}} config.dates - Date input ids.
+         * @param {string} config.clear - Clear button id.
+         * @param {{prev: string, next: string}} config.pager
+         * @param {() => void} [config.onChange] - Runs after any filter change, before reloading.
+         * @returns {void}
+         */
+        const wireFilters = ({ view, load, pageSize, search, selects, dates, clear, pager, onChange = () => {} }) => {
+            const reload = () => {
+                view.offset = 0;
+                onChange();
+                load();
+            };
+            const searchInput = byId(search);
+            wireSearchBox(searchInput, null, (text) => {
+                if (text === view.q) return;
+                view.q = text;
+                reload();
+            }, 400);
+            for (const [key, id] of Object.entries(selects)) {
+                byId(id).addEventListener('change', (e) => { view[key] = e.target.value; reload(); });
+            }
+            for (const key of ['from', 'to']) {
+                byId(dates[key]).addEventListener('change', (e) => { view[key] = e.target.value; reload(); });
+            }
+            byId(clear).addEventListener('click', () => {
+                searchInput.value = '';
+                view.q = '';
+                for (const [key, id] of Object.entries(selects)) { byId(id).value = ''; view[key] = ''; }
+                for (const key of ['from', 'to']) { byId(dates[key]).value = ''; view[key] = ''; }
+                reload();
+            });
+            byId(pager.prev).addEventListener('click', () => { view.offset = Math.max(0, view.offset - pageSize); load(); });
+            byId(pager.next).addEventListener('click', () => { view.offset += pageSize; load(); });
+        };
+
+        // A verdict only exists on WEVA evaluations and network denials, so
+        // the verdict filter is switched off for any other event type
+        // rather than left to silently match nothing.
+        const verdictSelect = byId('logVerdictFilter');
+        const syncVerdictFilter = () => {
+            const applies = !logView.type || VERDICT_EVENT_TYPES.includes(logView.type);
+            verdictSelect.disabled = !applies;
+            if (!applies) { verdictSelect.value = ''; logView.verdict = ''; }
+        };
+
+        wireFilters({
+            view: logView, load: fetchLogs, pageSize: LOG_PAGE_SIZE,
+            search: 'logSearchInput',
+            selects: { type: 'logTypeFilter', verdict: 'logVerdictFilter' },
+            dates: { from: 'logFromDate', to: 'logToDate' },
+            clear: 'btnClearLogFilters',
+            pager: LOG_PAGER,
+            onChange: syncVerdictFilter
+        });
+        wireFilters({
+            view: auditView, load: loadAudit, pageSize: AUDIT_PAGE_SIZE,
+            search: 'auditSearchInput',
+            selects: { entity: 'auditEntityFilter', outcome: 'auditOutcomeFilter' },
+            dates: { from: 'auditFromDate', to: 'auditToDate' },
+            clear: 'btnClearAuditFilters',
+            pager: AUDIT_PAGER
+        });
+
+        byId('btnRefreshLogs').addEventListener('click', fetchLogs);
+        byId('btnRefreshAudit').addEventListener('click', loadAudit);
+        byId('btnVerifyAudit').addEventListener('click', verifyAudit);
+        console.log('[admin_dashboard] Security logs and audit trail wired successfully.');
     } catch (err) {
-        console.error('[admin_dashboard] Security logs wiring FAILED:', err);
+        console.error('[admin_dashboard] Security logs / audit trail wiring FAILED:', err);
     }
 
     // =============================================================
@@ -1158,19 +1620,54 @@ if (!localStorage.getItem('authToken')) {
     // artifact an auditor can be handed, distinct from the live
     // dashboard. window.print() is a native browser capability;
     // style.css's @media print block performs the formatting, and this
-    // handler only stamps a real generation timestamp before invoking it.
+    // handler only stamps the letterhead before invoking it: when it was
+    // generated, and exactly what it covers - which tab, which filters,
+    // which rows of how many, and for the Audit Trail the latest integrity
+    // check. A report that prints 50 rows must not read as the whole log.
     try {
         console.log('[admin_dashboard] Wiring printable audit report...');
         const btnGenerateReport = document.getElementById('btnGenerateReport');
         const reportTimestamp = document.getElementById('reportTimestamp');
+        const reportScope = document.getElementById('reportScope');
         if (!btnGenerateReport) throw new Error('#btnGenerateReport not found in the DOM.');
 
-        btnGenerateReport.addEventListener('click', () => {
-            if (reportTimestamp) {
-                reportTimestamp.textContent = new Date().toLocaleString();
+        /** @returns {string} One line describing what the printed report contains. */
+        const describeScope = () => {
+            const select = (id) => {
+                const element = document.getElementById(id);
+                return element && element.value ? element.options[element.selectedIndex].text : null;
+            };
+            const isAudit = activeLogTab === 'audit';
+            const view = isAudit ? auditView : logView;
+            const filters = (isAudit
+                ? [select('auditEntityFilter'), select('auditOutcomeFilter')]
+                : [select('logTypeFilter'), select('logVerdictFilter')]
+            ).filter(Boolean);
+            if (view.q) filters.push(`matching "${view.q}"`);
+            if (view.from) filters.push(`from ${view.from}`);
+            if (view.to) filters.push(`to ${view.to}`);
+
+            const rows = view.shown === 0
+                ? 'no matching entries'
+                : `entries ${formatCount(view.offset + 1)}-${formatCount(view.offset + view.shown)} of ${formatCount(view.total)}`;
+            let scope = `${isAudit ? 'Administrative Audit Trail' : 'Security Events'} · ${filters.length ? filters.join(', ') : 'no filters'} · ${rows}`;
+            if (isAudit && lastVerification) {
+                scope += lastVerification.intact
+                    ? ` · Chain verified intact (${formatCount(lastVerification.checked)} entries, newest seal ${lastVerification.headHash || 'none'}) at ${formatTimestamp(lastVerification.verifiedAt)}`
+                    : ` · TAMPERING DETECTED at entry #${lastVerification.brokenAt} (checked ${formatTimestamp(lastVerification.verifiedAt)})`;
+            } else if (isAudit) {
+                scope += ' · Integrity not verified before printing';
             }
+            return scope;
+        };
+
+        const printReport = () => {
+            if (reportTimestamp) reportTimestamp.textContent = new Date().toLocaleString();
+            if (reportScope) reportScope.textContent = describeScope();
             window.print();
-        });
+        };
+        btnGenerateReport.addEventListener('click', printReport);
+        document.querySelectorAll('.js-print-report').forEach(button => button.addEventListener('click', printReport));
         console.log('[admin_dashboard] Printable audit report wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Printable audit report wiring FAILED:', err);
@@ -1211,7 +1708,7 @@ if (!localStorage.getItem('authToken')) {
             // than a generic error.
             const accountEmail = row.dataset.accountEmail;
             const ownDeviceId = await getDeviceFingerprint();
-            const isOwn = accountEmail ? accountEmail === localStorage.getItem('userEmail') : identifier === ownDeviceId;
+            const isOwn = accountEmail ? accountEmail === localStorage.getItem(ADMIN_SESSION.email) : identifier === ownDeviceId;
             if (isOwn) {
                 const blockedUntil = row.dataset.blockedUntil ? new Date(row.dataset.blockedUntil) : null;
                 const secondsLeft = blockedUntil ? Math.max(1, Math.ceil((blockedUntil.getTime() - Date.now()) / 1000)) : 60;
