@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createSecurityMiddleware, readVerdict } from './securityMiddleware.js';
 import { settleDeviceAttempts } from '../core/monitor.js';
-import { settleIpAttempts } from '../core/ipAttempts.js';
+import { settleIpAttempts, countRecentAttempts } from '../core/ipAttempts.js';
 
 /**
  * @fileoverview Drives the full WEVA request pipeline (identity -> features
@@ -60,6 +60,10 @@ async function withClock(fn) {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
         let now = Date.parse('2026-09-24T03:00:00Z');
+        // Set before `fn` runs, so a request sent before the first advance
+        // is stamped at the start time - not at the real current date,
+        // which lies ahead of every simulated time and would never age out.
+        vi.setSystemTime(now);
         await fn((ms) => { now += ms; vi.setSystemTime(now); });
     } finally {
         vi.useRealTimers();
@@ -97,23 +101,64 @@ describe('securityMiddleware - simultaneous requests (race condition)', () => {
 });
 
 describe('securityMiddleware - IP layer', () => {
-    it('blocks the IP itself when a bot uses a new x-device-id on every attempt', async () => {
+    it('throttles the IP itself when a bot uses a new x-device-id on every attempt: 4 guesses per 30 s, never a block', async () => {
         const { middleware, store } = buildMiddleware();
         const ip = uniqueIp();
-
         const outcomes = [];
-        for (let i = 0; i < 9; i++) {
-            outcomes.push(await send(middleware, loginRequest({ deviceId: uniqueId('rotating'), ip })));
-        }
+        const later = [];
 
-        // Same 4 / 3 / BLOCK ladder a single device gets - rotating IDs buys nothing.
+        await withClock(async (advance) => {
+            for (let i = 0; i < 9; i++) {
+                outcomes.push(await send(middleware, loginRequest({ deviceId: uniqueId('rotating'), ip })));
+                advance(1000);
+            }
+            // 30.5 s after the first guess it has left the window; the 5
+            // refused guesses were never recorded, so exactly one more gets
+            // through - and the next is throttled behind it.
+            advance(21500);
+            later.push(await send(middleware, loginRequest({ deviceId: uniqueId('rotating'), ip })));
+            advance(100);
+            later.push(await send(middleware, loginRequest({ deviceId: uniqueId('rotating'), ip })));
+        });
+
+        // The same 4 password checks a single device gets before THROTTLE...
         expect(outcomes.map(o => o.passed)).toEqual([true, true, true, true, false, false, false, false, false]);
-        expect(outcomes.slice(4, 7).map(o => o.status)).toEqual([429, 429, 429]);
-        expect(outcomes[7].status).toBe(403);
-        expect(store.rows.get(ip)?.isBlocked).toBe(true);
+        expect(outcomes.slice(4).map(o => o.status)).toEqual([429, 429, 429, 429, 429]);
+        // ...but the IP layer stops at THROTTLE: refused guesses are not
+        // recorded, so its window never reaches BLOCK, and nothing is stored.
+        expect(store.rows.has(ip)).toBe(false);
+        expect(later.map(o => o.passed)).toEqual([true, false]);
+        expect(later[1].status).toBe(429);
+    });
 
-        // A 9th, never-seen device ID from the same IP is still refused.
-        expect(outcomes[8].status).toBe(403);
+    it('does not count refused attempts at the IP, so a busy shared address recovers instead of locking itself out', async () => {
+        const { middleware } = buildMiddleware();
+        const ip = uniqueIp();
+        const refused = [];
+        let windowAtThrottle;
+        let windowAfter;
+
+        await withClock(async (advance) => {
+            // Four students on one campus IP mistype within a few seconds:
+            // the IP window reaches THROTTLE.
+            for (let i = 0; i < 4; i++) {
+                await send(middleware, loginRequest({ deviceId: uniqueId('typo'), ip, email: `typo${i}@x.edu.ph` }));
+                advance(500);
+            }
+            // Thirty more students arrive over the next 24 s and are throttled.
+            for (let i = 0; i < 30; i++) {
+                refused.push(await send(middleware, loginRequest({ deviceId: uniqueId('arrival'), ip, email: `s${i}@x.edu.ph` })));
+                advance(800);
+            }
+            windowAtThrottle = countRecentAttempts(ip);
+            // Once the four typos are 30 s old the window is empty again -
+            // none of the 30 refusals were recorded to keep it full.
+            advance(6000);
+            windowAfter = countRecentAttempts(ip);
+        });
+        expect(refused.every(o => o.status === 429)).toBe(true);
+        expect(windowAtThrottle).toBe(4);
+        expect(windowAfter).toBe(0);
     });
 
     it('keeps the per-device ladder for one paced device, blocking the device rather than its IP', async () => {
@@ -190,7 +235,11 @@ describe('securityMiddleware - own-account logins between guesses (#1)', () => {
     });
 
     it('keeps counting them at the IP when the device ID rotates too (was 30 of 30)', async () => {
-        expect(await ownAccountAttack({ rotate: true })).toBe(4);
+        // The IP layer allows 4 password checks per 30 s window and the
+        // attack runs for 80 s: 12. The logins to the attacker's own account
+        // settle none of the victim's - with whole-window settling, all 30
+        // guesses reached the password check.
+        expect(await ownAccountAttack({ rotate: true })).toBe(12);
     });
 
     it('still gives the next student on a shared IP a clean start after a typo-then-success', async () => {

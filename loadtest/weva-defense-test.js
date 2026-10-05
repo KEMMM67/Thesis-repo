@@ -11,7 +11,8 @@
 // WEVA's IP layer (core/ipAttempts.js) would merge them into one attacker. GAP_S of
 // quiet between attacks lets that IP's 30 s attempt window empty, so each attack
 // demonstrates one WEVA factor on its own. The rotating attack runs last because it
-// ends with this IP blocked for 60 s - wait a minute before re-running.
+// ends with this IP throttled until its last guesses are 30 s old - wait half a
+// minute before re-running.
 
 import http from 'k6/http';
 import { sleep } from 'k6';
@@ -103,8 +104,11 @@ const thresholds = {
   thresholds[`legit_success{phase:${phase}}`] = ['rate>0.99'];
   thresholds[`legit_latency_ms{phase:${phase}}`] = [`p(95)<${LEGIT_P95_MS}`];
 });
-// The password-check caps are the thesis claims: a paced or rotating attack gets
-// the 4 guesses before THROTTLE however many bots share the IP, a burst gets 2.
+// The password-check caps are the thesis claims: a paced attack gets the 4 guesses
+// before THROTTLE, a burst gets 2. A rotating attack is seen only by the IP layer,
+// which throttles but never blocks (core/ipAttempts.js): at most 4 guesses in any
+// 30 s, so 4 per started 30 s of the attack, counting k6's 5 s graceful stop.
+// Its guesses that pass after the first THROTTLE are that allowance, not leaks.
 if (PACED_VUS > 0) {
   scenarios.paced_bot = botScenario(PACED_VUS, 'pacedBot', PACED_START, PACED_S);
   thresholds.paced_password_checks = [`count<=${predictedAttempt(THROTTLE_THRESHOLD) - 1}`];
@@ -117,8 +121,7 @@ if (BURST_VUS > 0) {
 }
 if (ROTATE_VUS > 0) {
   scenarios.rotating_bot = botScenario(ROTATE_VUS, 'rotatingBot', ROTATE_START, ROTATE_S);
-  thresholds.rotating_password_checks = [`count<=${predictedAttempt(THROTTLE_THRESHOLD) - 1}`];
-  thresholds.rotating_leaks_after_detection = ['count==0'];
+  thresholds.rotating_password_checks = [`count<=${(predictedAttempt(THROTTLE_THRESHOLD) - 1) * Math.ceil((ROTATE_S + 5) / 30)}`];
 }
 
 export const options = {
@@ -155,7 +158,7 @@ export function setup() {
     });
     const body = parseBody(res);
     if (res.status === 403 || res.status === 429) {
-      exec.test.abort(`Legit login refused by WEVA (HTTP ${res.status}) - this machine's IP is still blocked from a previous run. Wait a minute and retry.`);
+      exec.test.abort(`Legit login refused by WEVA (HTTP ${res.status}) - this machine's IP is still throttled or blocked from a previous run. Wait a minute and retry.`);
     }
     if (res.status !== 200 || !body || !body.token) {
       exec.test.abort(`Legit login failed for ${account.email} (HTTP ${res.status}): ${String(res.body).slice(0, 160)} - legit users must be seeded student accounts.`);
@@ -347,7 +350,15 @@ function buildReport(data) {
       `  Leaks in later bursts      : ${leaked}`
     );
   }
-  if (ROTATE_VUS > 0) ladder('rotating', 'ROTATING DEVICE ID', 'a new x-device-id on every guess (IP layer)');
+  if (ROTATE_VUS > 0) {
+    lines.push(
+      '',
+      'ROTATING DEVICE ID - a new x-device-id on every guess (IP layer: throttles, never blocks)',
+      `  Reached the password check : ${count('rotating_password_checks')}   (formula: at most ${throttleAt - 1} in any 30 s)`,
+      `  First THROTTLE             : attempt #${med('rotating_attempts_until_throttle')}   (formula: #${throttleAt})`,
+      `  Passed after first THROTTLE: ${count('rotating_leaks_after_detection')}   (guesses let through as earlier ones aged out of the 30 s window)`
+    );
+  }
 
   lines.push(
     '',
