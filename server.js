@@ -12,6 +12,7 @@ import { apiNotFound, jsonErrorHandler } from "./middleware/errorHandlers.js";
 import prisma from "./config/prisma.js";
 import { securityConfig } from "./config/securityConfig.js";
 import { resolveTrustProxy } from "./config/trustProxy.js";
+import { describeDatabaseUrl } from "./config/databaseUrl.js";
 import { PrismaAuditSink, PrismaIpTrackingStore, PrismaIdentityResolver } from "./adapters/prisma/index.js";
 import { createWeva } from "./core/weva.js";
 import { parseAccountKey } from "./middleware/clientIdentity.js";
@@ -34,6 +35,14 @@ const trustProxy = resolveTrustProxy(process.env);
 app.set('trust proxy', trustProxy.hops);
 console.log(`[CONFIG] trust proxy: ${trustProxy.hops} hop(s) - ${trustProxy.source}`);
 
+// The TLS and pool settings Prisma will use for RDS, read off DATABASE_URL's
+// query parameters - never the URL itself, which holds the password. Warns
+// on Render if sslmode=require or connection_limit is missing; see
+// config/databaseUrl.js.
+const database = describeDatabaseUrl(process.env);
+console.log(`[CONFIG] database: ${database.summary}`);
+database.warnings.forEach(warning => console.warn(`[CONFIG] WARNING: ${warning}`));
+
 if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET is not set. Add it to your .env file before starting the server.");
 }
@@ -47,6 +56,50 @@ app.use(cors({
 }));
 
 app.use(express.json());
+
+/** How long GET /healthz waits on the database before calling it unreachable. */
+const HEALTH_DB_TIMEOUT_MS = 3000;
+
+/**
+ * @route GET /healthz
+ * @access Public
+ * @description Health check for Render (set as the service's Health Check
+ * Path) and for the keep-warm pinger that stops the free instance from
+ * spinning down during defense week. Answers 200 only if the database
+ * answers a trivial `SELECT 1` too: a process that is up but cannot reach
+ * RDS cannot serve a single page of real data, so it should not be
+ * reported healthy - with this as Render's health check, a deploy whose
+ * DATABASE_URL is wrong fails its check instead of going live.
+ *
+ * Deliberately outside every other layer: no auth, no IP whitelist, and
+ * not scored by WEVA, so a ping every few minutes never writes audit rows
+ * or feeds the dashboard's anomaly chart. It reveals nothing - a fixed
+ * body, and no error detail (that goes to the server log only). It is
+ * registered ahead of the traffic logger below so those pings do not
+ * flood the console either.
+ *
+ * The timeout matters because a dead database does not fail fast: Prisma
+ * waits up to its connect/pool timeouts first. A health check that hangs
+ * looks the same as a server that hangs.
+ */
+app.get('/healthz', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    let timer;
+    try {
+        await Promise.race([
+            prisma.$queryRaw`SELECT 1`,
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`no answer within ${HEALTH_DB_TIMEOUT_MS} ms`)), HEALTH_DB_TIMEOUT_MS);
+            })
+        ]);
+        res.json({ status: 'ok', database: 'ok' });
+    } catch (err) {
+        console.error('[HEALTH] Database check failed:', err.message);
+        res.status(503).json({ status: 'error', database: 'unreachable' });
+    } finally {
+        clearTimeout(timer);
+    }
+});
 
 app.use((req, res, next) => {
     console.log(`\n[TRAFFIC DETECTED] Request received on endpoint: ${req.path}`);
@@ -1091,6 +1144,9 @@ app.use(jsonErrorHandler);
 // thesis-defense demo.
 const ENABLE_HTTPS = (process.env.ENABLE_HTTPS || '').trim().toLowerCase() === 'true';
 
+/** The listening server, kept so the shutdown handler below can close it. */
+let server;
+
 if (ENABLE_HTTPS) {
     const keyPath = process.env.TLS_KEY_PATH || path.join(__dirname, 'certs', 'localhost-key.pem');
     const certPath = process.env.TLS_CERT_PATH || path.join(__dirname, 'certs', 'localhost-cert.pem');
@@ -1109,15 +1165,68 @@ if (ENABLE_HTTPS) {
         );
     }
 
-    https.createServer(httpsOptions, app).listen(PORT, () => {
+    server = https.createServer(httpsOptions, app).listen(PORT, () => {
         console.log("--------------------------------------------------");
         console.log(`🟢 SYSTEM ONLINE (HTTPS): Server is actively listening on https://localhost:${PORT}`);
         console.log("--------------------------------------------------");
     });
 } else {
-    app.listen(PORT, () => {
+    server = app.listen(PORT, () => {
         console.log("--------------------------------------------------");
         console.log(`🟢 SYSTEM ONLINE: Server is actively listening on Port ${PORT}`);
         console.log("--------------------------------------------------");
     });
 }
+
+// ---------------------------------------------------------------------
+// GRACEFUL SHUTDOWN
+// ---------------------------------------------------------------------
+// Render sends SIGTERM before every deploy, restart and free-tier
+// spin-down, and kills the process outright if it is still running about
+// 30 s later. Left to Node's default, SIGTERM exits on the spot: requests
+// in flight are cut off mid-response (a grade save, a JSON snapshot
+// download) and Prisma's pooled connections are dropped without being
+// closed, so RDS keeps them open until they time out on its side. Instead,
+// stop accepting new connections, let in-flight requests finish, close the
+// pool, then exit. SIGINT (Ctrl+C in a local terminal) takes the same
+// path; a second signal skips the wait.
+//
+// The 10 s cap is a backstop well inside Render's grace period: a request
+// that never finishes (e.g. a stalled snapshot stream) must not keep the
+// process alive until Render kills it mid-cleanup.
+const SHUTDOWN_TIMEOUT_MS = 10_000;
+let shuttingDown = false;
+
+/**
+ * @param {string} signal - The signal that triggered the shutdown, for the log.
+ * @returns {void}
+ */
+function shutdown(signal) {
+    if (shuttingDown) {
+        console.log(`[SHUTDOWN] ${signal} received again - exiting now.`);
+        process.exit(1);
+    }
+    shuttingDown = true;
+    console.log(`[SHUTDOWN] ${signal} received - finishing in-flight requests...`);
+
+    setTimeout(() => {
+        console.error(`[SHUTDOWN] Requests still open after ${SHUTDOWN_TIMEOUT_MS / 1000} s - forcing exit.`);
+        process.exit(1);
+    }, SHUTDOWN_TIMEOUT_MS).unref();
+
+    // close() stops new connections and, on Node 19+, also closes idle
+    // keep-alive ones (the dashboard's pollers hold some open); its callback
+    // runs once the last in-flight request has finished.
+    server.close(async () => {
+        try {
+            await prisma.$disconnect();
+        } catch (err) {
+            console.error('[SHUTDOWN] Could not close database connections cleanly:', err.message);
+        }
+        console.log('[SHUTDOWN] Closed cleanly.');
+        process.exit(0);
+    });
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
