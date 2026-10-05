@@ -2,7 +2,7 @@
 
 > Adaptive runtime application security with behavioral profiling — purpose-built for Student Information Systems.
 
-[![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-24-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Express](https://img.shields.io/badge/Express-5.x-000000?style=flat-square&logo=express&logoColor=white)](https://expressjs.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Prisma](https://img.shields.io/badge/Prisma-ORM-2D3748?style=flat-square&logo=prisma&logoColor=white)](https://www.prisma.io/)
@@ -84,7 +84,7 @@ This separation means the detection algorithm can be tested, reasoned about, and
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 24 (pinned via `engines` in package.json)
 - A running PostgreSQL instance
 - npm
 
@@ -135,8 +135,8 @@ ALLOWED_ADMIN_IPS=
 # 4. Run database migrations
 npx prisma migrate dev
 
-# 5. Start the development server
-npm start
+# 5. Start the development server (nodemon, opens the browser on Windows)
+npm run dev
 ```
 
 ### Running Tests

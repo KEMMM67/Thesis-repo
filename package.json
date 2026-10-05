@@ -4,8 +4,12 @@
   "description": "Behavioral Profiling Security Framework for SIS",
   "main": "server.js",
   "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
-    "start": "start http://localhost:3000 & nodemon server.js",
+    "start": "node server.js",
+    "dev": "start http://localhost:3000 & nodemon server.js",
     "test": "vitest run",
     "seed:bulk": "node prisma/seed-bulk.js"
   },
