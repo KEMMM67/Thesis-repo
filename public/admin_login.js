@@ -34,6 +34,31 @@ const LOGIN_IDLE_LABEL = 'Login';
 const VERIFY_IDLE_LABEL = 'Verify';
 const RESEND_IDLE_LABEL = 'Resend code';
 
+// Where the Admin Portal keeps its session in localStorage. Both portals
+// are served from one origin, so they share one localStorage - and under
+// the shared keys they used to have (authToken, userEmail), signing in to
+// the Student Portal in another tab replaced the admin's token with a
+// student's. Every dashboard request then failed the admin role check,
+// which the dashboard showed as a WEVA lockout. Each portal now has keys
+// of its own; public/admin_dashboard.js reads these same two.
+const ADMIN_SESSION = { token: 'sis.admin.token', email: 'sis.admin.email' };
+
+/**
+ * Stores a freshly issued admin session, and clears the old shared keys
+ * if this browser still has them, so a stale token does not sit in
+ * storage until it expires.
+ *
+ * @param {string} token - JWT from the server.
+ * @param {string} email - The signed-in admin's email.
+ * @returns {void}
+ */
+function storeAdminSession(token, email) {
+    localStorage.setItem(ADMIN_SESSION.token, token);
+    localStorage.setItem(ADMIN_SESSION.email, email);
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('userEmail');
+}
+
 // Calmer secondary line shown under a BLOCK/THROTTLE message - the primary
 // line is deliberately alarming ("CRITICAL THREAT...", straight from
 // core/mitigation.js), which is correct for an actual attacker but can read
@@ -337,8 +362,7 @@ loginForm.addEventListener('submit', async function (event) {
                 return;
             }
 
-            localStorage.setItem('authToken', data.token);
-            localStorage.setItem('userEmail', emailValue);
+            storeAdminSession(data.token, emailValue);
             showMessage(loginMessage, "SUCCESS: " + data.message, "success");
             // Left disabled/loading deliberately: the page is navigating away.
             setTimeout(() => { window.location.href = "admin_dashboard.html"; }, 1000);
@@ -409,8 +433,7 @@ otpForm.addEventListener('submit', async function (event) {
         }
 
         if (response.ok && data.token) {
-            localStorage.setItem('authToken', data.token);
-            localStorage.setItem('userEmail', pendingOtpEmail);
+            storeAdminSession(data.token, pendingOtpEmail);
             showMessage(otpMessage, "SUCCESS: " + data.message, "success");
             // Left disabled/loading deliberately: the page is navigating away.
             setTimeout(() => { window.location.href = "admin_dashboard.html"; }, 1000);

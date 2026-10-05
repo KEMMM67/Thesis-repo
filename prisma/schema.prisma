@@ -44,6 +44,11 @@ enum StudentStatus {
   DROPPED
 }
 
+enum AuditOutcome {
+  SUCCESS
+  FAILURE
+}
+
 model User {
   id           Int      @id @default(autoincrement())
   email        String   @unique @db.VarChar(255)
@@ -142,6 +147,49 @@ model Session {
 
   @@index([userId])
   @@map("sessions")
+}
+
+// The administrative audit trail: one row per change an administrator
+// made (or tried to make) to student, subject or grade records, admin
+// accounts, WEVA blocks, or the database as a whole. Written only by
+// utils/auditTrail.js, which explains each column's role in detail.
+//
+// Rows are permanent, and that is enforced twice:
+//   - Prevented: database triggers (see this table's migration) reject
+//     every UPDATE, DELETE and TRUNCATE, whoever runs it.
+//   - Detected: each row carries an HMAC of its own contents plus the
+//     previous row's HMAC (prevHash -> hash), so editing, removing or
+//     reordering any row - e.g. by someone who first disabled those
+//     triggers - breaks the chain at that row (GET /api/admin/audit/verify).
+//
+// actorUserId is deliberately a plain column, not a relation to User: a
+// foreign key's ON DELETE action would rewrite audit rows whenever a user
+// was deleted, which is exactly what this table must never allow.
+//
+// `detail` (which fields changed, from what, to what) is AES-256-GCM
+// ciphertext: a grade change records the grades themselves, and the
+// audit trail must not become a plaintext copy of an encrypted column.
+model AuditLog {
+  id          Int          @id @default(autoincrement())
+  occurredAt  DateTime     @map("occurred_at")
+  actorUserId Int?         @map("actor_user_id")
+  actorEmail  String       @map("actor_email") @db.VarChar(255)
+  actorRole   String       @map("actor_role") @db.VarChar(20)
+  action      String       @db.VarChar(50)
+  entityType  String       @map("entity_type") @db.VarChar(50)
+  entityId    String       @map("entity_id") @db.VarChar(150)
+  outcome     AuditOutcome
+  statusCode  Int          @map("status_code")
+  ipAddress   String?      @map("ip_address") @db.VarChar(45)
+  deviceId    String?      @map("device_id") @db.VarChar(45)
+  detail      String?
+  prevHash    String       @map("prev_hash") @db.Char(64)
+  hash        String       @unique @db.Char(64)
+
+  @@index([occurredAt])
+  @@index([actorEmail])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
 }
 
 model IpTracking {

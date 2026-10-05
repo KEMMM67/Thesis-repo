@@ -297,17 +297,53 @@
                     <div class="print-letterhead">
                         <h1>Student Information System &mdash; Security Audit Report</h1>
                         <p>WEVA (Weighted Endpoint &amp; Velocity Algorithm) Behavioral Security Framework &middot; Generated <span id="reportTimestamp"></span></p>
+                        <p id="reportScope"></p>
                     </div>
-                    <div class="panel">
+
+                    <div class="log-tabs" role="tablist" aria-label="Security and audit logs">
+                        <button type="button" class="log-tab is-active" role="tab" id="tabSecurityEvents" aria-selected="true" aria-controls="panelSecurityEvents">
+                            <i class="fa-solid fa-shield-halved"></i> Security Events
+                        </button>
+                        <button type="button" class="log-tab" role="tab" id="tabAuditTrail" aria-selected="false" aria-controls="panelAuditTrail" tabindex="-1">
+                            <i class="fa-solid fa-file-signature"></i> Audit Trail
+                        </button>
+                    </div>
+
+                    <div class="panel" id="panelSecurityEvents" role="tabpanel" aria-labelledby="tabSecurityEvents">
                         <div class="panel__header">
                             <div>
-                                <h2 class="panel__title">Live Security Logs</h2>
-                                <p class="panel__subtitle">Every WEVA evaluation, with the score formula behind each decision.</p>
+                                <h2 class="panel__title">Security Events</h2>
+                                <p class="panel__subtitle">Every WEVA evaluation, sign-in and network denial, with the score formula behind each decision.</p>
                             </div>
                             <div class="panel__actions">
                                 <button class="refresh-btn" id="btnRefreshLogs"><i class="fa-solid fa-rotate"></i> Refresh Live Data</button>
                                 <button class="btn-secondary" id="btnGenerateReport"><i class="fa-solid fa-print"></i> Generate Audit Report</button>
                             </div>
+                        </div>
+                        <div class="panel__toolbar log-filters">
+                            <label class="search-field">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="search" id="logSearchInput" placeholder="Email, device ID, IP, endpoint" aria-label="Search security events" autocomplete="off">
+                            </label>
+                            <select class="toolbar-select" id="logTypeFilter" aria-label="Event type">
+                                <option value="">All events</option>
+                                <option value="SECURITY_EVALUATION">WEVA evaluations</option>
+                                <option value="LOGIN_SUCCESS">Sign-ins</option>
+                                <option value="LOGIN_FAILED">Failed sign-ins</option>
+                                <option value="OTP_REQUESTED">OTP requests</option>
+                                <option value="LOGOUT">Sign-outs</option>
+                                <option value="NETWORK_ACCESS_DENIED">Network denials</option>
+                            </select>
+                            <select class="toolbar-select" id="logVerdictFilter" aria-label="WEVA verdict">
+                                <option value="">Any verdict</option>
+                                <option value="ALLOW">ALLOW</option>
+                                <option value="LOG">LOG</option>
+                                <option value="THROTTLE">THROTTLE</option>
+                                <option value="BLOCK">BLOCK</option>
+                            </select>
+                            <label class="toolbar-date"><span>From</span><input type="date" id="logFromDate"></label>
+                            <label class="toolbar-date"><span>To</span><input type="date" id="logToDate"></label>
+                            <button type="button" class="btn-text" id="btnClearLogFilters"><i class="fa-solid fa-xmark"></i> Clear</button>
                         </div>
                         <div class="table-wrap">
                             <table class="data-table data-table--logs">
@@ -318,6 +354,68 @@
                                     <tr><td colspan="4">Loading system logs...</td></tr>
                                 </tbody>
                             </table>
+                        </div>
+                        <div class="panel__footer">
+                            <p class="panel__count" id="logsCount" aria-live="polite"></p>
+                            <div class="pager">
+                                <button type="button" class="btn-secondary" id="btnLogsPrev" disabled><i class="fa-solid fa-chevron-left"></i> Newer</button>
+                                <button type="button" class="btn-secondary" id="btnLogsNext" disabled>Older <i class="fa-solid fa-chevron-right"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel" id="panelAuditTrail" role="tabpanel" aria-labelledby="tabAuditTrail" hidden>
+                        <div class="panel__header">
+                            <div>
+                                <h2 class="panel__title">Administrative Audit Trail</h2>
+                                <p class="panel__subtitle">Every change an administrator made, with who, what, from where, and the old and new values. Entries are permanent and sealed in a tamper-evident HMAC chain.</p>
+                            </div>
+                            <div class="panel__actions">
+                                <button class="btn-primary" id="btnVerifyAudit"><i class="fa-solid fa-link"></i> Verify Integrity</button>
+                                <button class="refresh-btn" id="btnRefreshAudit"><i class="fa-solid fa-rotate"></i> Refresh</button>
+                                <button class="btn-secondary js-print-report"><i class="fa-solid fa-print"></i> Generate Audit Report</button>
+                            </div>
+                        </div>
+                        <div class="integrity-status" id="auditIntegrity" role="status" aria-live="polite" hidden></div>
+                        <div class="panel__toolbar log-filters">
+                            <label class="search-field">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="search" id="auditSearchInput" placeholder="Admin email, student ID, subject" aria-label="Search the audit trail" autocomplete="off">
+                            </label>
+                            <select class="toolbar-select" id="auditEntityFilter" aria-label="Record type">
+                                <option value="">All records</option>
+                                <option value="Student">Students</option>
+                                <option value="Subject">Subjects</option>
+                                <option value="Grade">Grades</option>
+                                <option value="AdminAccount">Admin accounts</option>
+                                <option value="WevaBlock">WEVA blocks</option>
+                                <option value="Database">Database exports</option>
+                            </select>
+                            <select class="toolbar-select" id="auditOutcomeFilter" aria-label="Outcome">
+                                <option value="">Any outcome</option>
+                                <option value="SUCCESS">Succeeded</option>
+                                <option value="FAILURE">Refused / failed</option>
+                            </select>
+                            <label class="toolbar-date"><span>From</span><input type="date" id="auditFromDate"></label>
+                            <label class="toolbar-date"><span>To</span><input type="date" id="auditToDate"></label>
+                            <button type="button" class="btn-text" id="btnClearAuditFilters"><i class="fa-solid fa-xmark"></i> Clear</button>
+                        </div>
+                        <div class="table-wrap">
+                            <table class="data-table data-table--audit">
+                                <thead>
+                                    <tr><th>Entry</th><th>Administrator</th><th>Action</th><th>Changes</th></tr>
+                                </thead>
+                                <tbody id="auditTableBody">
+                                    <tr><td colspan="4">Loading the audit trail...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="panel__footer">
+                            <p class="panel__count" id="auditCount" aria-live="polite"></p>
+                            <div class="pager">
+                                <button type="button" class="btn-secondary" id="btnAuditPrev" disabled><i class="fa-solid fa-chevron-left"></i> Newer</button>
+                                <button type="button" class="btn-secondary" id="btnAuditNext" disabled>Older <i class="fa-solid fa-chevron-right"></i></button>
+                            </div>
                         </div>
                     </div>
                 </section>

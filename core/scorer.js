@@ -221,6 +221,8 @@ export const defaultWevaConfig = {
                                    // throttle/block cadence (see the worked examples in
                                    // computeScore() below) without new tuning.
         "/api/admin/logs": 2,     // exposes the security audit trail itself
+        "/api/admin/audit": 2,    // exposes every change an administrator made (utils/auditTrail.js)
+        "/api/admin/audit/verify": 2, // reads the whole audit trail to recompute its seals
         "/api/students": 2,       // POST creates a new student record
         "/api/subjects": 2,       // POST creates a new subject record
         "/api/grades": 2,         // POST creates a new grade record

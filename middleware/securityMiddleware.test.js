@@ -40,7 +40,7 @@ function buildMiddleware(store = fakeIpTrackingStore(), { resolve = async () => 
 
 function loginRequest({ deviceId, ip, email }) {
     return {
-        headers: deviceId ? { 'x-device-id': deviceId } : {}, ip,
+        headers: deviceId ? { 'x-device-id': deviceId } : {}, ip, method: 'POST',
         baseUrl: '/api', path: '/login', route: { path: '/login' },
         body: email ? { email } : {}
     };
@@ -49,7 +49,7 @@ function loginRequest({ deviceId, ip, email }) {
 /** A signed-in admin's DELETE /api/students/:id, on a bulk-seeded student ID. */
 function adminDelete({ deviceId, ip, email = 'admin@x.edu.ph' }) {
     return {
-        headers: { 'x-device-id': deviceId }, ip, body: {},
+        headers: { 'x-device-id': deviceId }, ip, body: {}, method: 'DELETE',
         baseUrl: '', path: '/api/students/CC25-000001', route: { path: '/api/students/:id' },
         user: { email, role: 'admin' }
     };
@@ -222,7 +222,7 @@ describe('securityMiddleware - account layer after login (#2)', () => {
         expect(outcomes.slice(0, 3).map(o => o.passed)).toEqual([true, true, false]);
         expect(outcomes.slice(2).every(o => o.status === 403)).toBe(true);
         expect(store.rows.get('user:4201')?.isBlocked).toBe(true);
-        expect(audits[2].reason).toMatch(/^Account admin@x\.edu\.ph triggered BLOCK \(requests from every device signed in to it; device \S+ alone scored 0\)/);
+        expect(audits[2].reason).toMatch(/^Account admin@x\.edu\.ph triggered BLOCK on DELETE \/api\/students\/:id \(requests from every device signed in to it; device \S+ alone scored 0\)/);
     });
 
     it('still blocks just the device when one device tells the whole story (ties go to the device)', async () => {

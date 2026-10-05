@@ -33,7 +33,8 @@ const DEFAULT_BATCH_SIZE = 5000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
 const ENCRYPTION_NOTE = {
-    'grades.grade': 'AES-256-GCM envelope "iv:authTag:ciphertext" (base64 segments), exported exactly as stored. Decrypting requires FIELD_ENCRYPTION_KEY, which is never part of an export.'
+    'grades.grade': 'AES-256-GCM envelope "iv:authTag:ciphertext" (base64 segments), exported exactly as stored. Decrypting requires FIELD_ENCRYPTION_KEY, which is never part of an export.',
+    'auditLogs.detail': 'Same AES-256-GCM envelope, exported as stored. Each entry\'s hash is an HMAC-SHA256 seal over the entry and the previous entry\'s hash (utils/auditTrail.js); verifying it requires the server\'s key, which is never part of an export.'
 };
 
 /**
@@ -62,7 +63,10 @@ function exportTables(db) {
         ['anomalyScores', pageOf(db.anomalyScore)],
         ['securityActions', pageOf(db.securityAction)],
         ['behaviorLogs', pageOf(db.behaviorLog)],
-        ['ipTracking', pageOf(db.ipTracking)]
+        ['ipTracking', pageOf(db.ipTracking)],
+        // Not in fieldEncryption's ENCRYPTED_FIELDS, so `detail` is read back
+        // exactly as stored - encrypted - like grades above.
+        ['auditLogs', pageOf(db.auditLog)]
     ];
 }
 

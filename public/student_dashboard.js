@@ -14,7 +14,14 @@
 // from GET /api/students/me (server.js), which independently requires
 // authMiddleware and returns 401 with no token regardless of what this
 // check does - see loadDashboardData() below.
-if (!localStorage.getItem('authToken')) {
+//
+// The session lives under the Student Portal's own localStorage keys,
+// written by public/script.js at login. Both portals share one origin, so
+// one localStorage; separate keys are what let a student and an admin be
+// signed in on the same browser without one replacing the other's token.
+const STUDENT_SESSION = { token: 'sis.student.token', email: 'sis.student.email' };
+
+if (!localStorage.getItem(STUDENT_SESSION.token)) {
     window.location.replace('index.html');
 } else {
     console.log('[student_dashboard] Script parsed. Waiting for DOMContentLoaded...');
@@ -88,8 +95,8 @@ if (!localStorage.getItem('authToken')) {
      * @returns {void}
      */
     function goToLogin() {
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('userEmail');
+        localStorage.removeItem(STUDENT_SESSION.token);
+        localStorage.removeItem(STUDENT_SESSION.email);
         window.location.href = 'index.html';
     }
 
@@ -103,7 +110,7 @@ if (!localStorage.getItem('authToken')) {
      * @returns {Promise<Response>}
      */
     async function authFetch(path, options = {}) {
-        const token = localStorage.getItem('authToken');
+        const token = localStorage.getItem(STUDENT_SESSION.token);
 
         if (!token) {
             goToLogin();
@@ -194,7 +201,7 @@ if (!localStorage.getItem('authToken')) {
 
         btnLogout.addEventListener('click', async (event) => {
             event.preventDefault();
-            const token = localStorage.getItem('authToken');
+            const token = localStorage.getItem(STUDENT_SESSION.token);
             if (token) {
                 try {
                     await fetch(`${API_BASE}/api/logout`, {
@@ -206,8 +213,8 @@ if (!localStorage.getItem('authToken')) {
                     console.warn('[student_dashboard] Server-side logout failed; signing out locally anyway:', err);
                 }
             }
-            localStorage.removeItem('authToken');
-            localStorage.removeItem('userEmail');
+            localStorage.removeItem(STUDENT_SESSION.token);
+            localStorage.removeItem(STUDENT_SESSION.email);
             window.location.href = btnLogout.getAttribute('href') || 'index.html';
         });
         console.log('[student_dashboard] Logout wired successfully.');

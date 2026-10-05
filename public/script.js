@@ -124,6 +124,16 @@ function startCountdown(button, box, idleLabel, seconds, lockColor) {
 // submit handler can enforce the portal boundary below.
 const expectedPortal = document.body.dataset.portal;
 
+// Where each portal keeps its session in localStorage, by the role it is
+// for. Both portals share one origin, so one localStorage - and under the
+// shared keys they used to have (authToken, userEmail), signing in here
+// replaced an admin's token signed in on another tab. The dashboards read
+// these same keys (public/student_dashboard.js, public/admin_dashboard.js).
+const SESSION_KEYS = {
+    student: { token: 'sis.student.token', email: 'sis.student.email' },
+    admin: { token: 'sis.admin.token', email: 'sis.admin.email' }
+};
+
 loginForm.addEventListener('submit', async function(event) {
     event.preventDefault();
 
@@ -163,8 +173,8 @@ loginForm.addEventListener('submit', async function(event) {
             // controllers/authController.js#beginOtpChallenge) - but with no
             // OTP UI to show, that response has no `token` to store. Without
             // this check, the code below would fall straight through to
-            // localStorage.setItem('authToken', undefined) and redirect to a
-            // dashboard the browser can never actually authenticate against.
+            // storing an undefined token and redirect to a dashboard the
+            // browser can never actually authenticate against.
             if (data.requireOtp) {
                 showMessage("This account requires a verification code. Please sign in from the Admin Portal instead.", "error");
                 setLoading(false);
@@ -186,9 +196,14 @@ loginForm.addEventListener('submit', async function(event) {
             }
 
             // Every subsequent authenticated request reads this back and sends
-            // it as Authorization: Bearer <token>.
-            localStorage.setItem('authToken', data.token);
-            localStorage.setItem('userEmail', emailValue);
+            // it as Authorization: Bearer <token> - stored under the keys of
+            // the dashboard about to be opened, and the old shared keys
+            // cleared so a stale token does not linger in storage.
+            const session = SESSION_KEYS[data.role === 'admin' ? 'admin' : 'student'];
+            localStorage.setItem(session.token, data.token);
+            localStorage.setItem(session.email, emailValue);
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('userEmail');
 
             showMessage("SUCCESS: " + data.message, "success");
             // Left disabled/loading deliberately: the page is navigating away.
