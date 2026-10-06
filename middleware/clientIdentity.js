@@ -52,7 +52,8 @@ const ACCOUNT_KEY_PATTERN = /^user:(\d+)$/;
  * without this the campus whitelist's ALLOWED_ADMIN_IPS=127.0.0.1 could
  * fail to match the developer's own machine, and WEVA's IP layer would
  * count one client under two keys. Shared by both
- * (middleware/ipWhitelistMiddleware.js, getClientIdentity() below).
+ * (middleware/ipWhitelistMiddleware.js and the ALLOWED_ADMIN_IPS parser in
+ * config/adminNetworks.js; getClientIdentity() below).
  *
  * @param {string} ip
  * @returns {string}

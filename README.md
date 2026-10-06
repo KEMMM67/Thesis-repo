@@ -128,6 +128,8 @@ FIELD_ENCRYPTION_KEY=
 # Optional hardening
 ENABLE_HTTPS=
 ENABLE_IP_WHITELIST=
+# Addresses and/or CIDR ranges, e.g. 127.0.0.1,::1,203.0.113.0/24
+# (ranges broader than /16 for IPv4 or /32 for IPv6 are ignored)
 ALLOWED_ADMIN_IPS=
 ```
 

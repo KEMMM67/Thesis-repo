@@ -13,6 +13,7 @@ import prisma from "./config/prisma.js";
 import { securityConfig } from "./config/securityConfig.js";
 import { resolveTrustProxy } from "./config/trustProxy.js";
 import { describeDatabaseUrl } from "./config/databaseUrl.js";
+import { describeAdminWhitelist } from "./config/adminNetworks.js";
 import { PrismaAuditSink, PrismaIpTrackingStore, PrismaIdentityResolver } from "./adapters/prisma/index.js";
 import { createWeva } from "./core/weva.js";
 import { parseAccountKey, getClientIdentity } from "./middleware/clientIdentity.js";
@@ -43,6 +44,14 @@ console.log(`[CONFIG] trust proxy: ${trustProxy.hops} hop(s) - ${trustProxy.sour
 const database = describeDatabaseUrl(process.env);
 console.log(`[CONFIG] database: ${database.summary}`);
 database.warnings.forEach(warning => console.warn(`[CONFIG] WARNING: ${warning}`));
+
+// The campus-network whitelist the Admin Portal is held to, as it will be
+// enforced - so after ALLOWED_ADMIN_IPS changes on Render, the deploy log
+// shows whether the venue's address or range made it in, and names any entry
+// that was ignored as malformed or too broad. See config/adminNetworks.js.
+const adminWhitelist = describeAdminWhitelist(process.env);
+console.log(`[CONFIG] admin IP whitelist: ${adminWhitelist.summary}`);
+adminWhitelist.warnings.forEach(warning => console.warn(`[CONFIG] WARNING: ${warning}`));
 
 if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET is not set. Add it to your .env file before starting the server.");
