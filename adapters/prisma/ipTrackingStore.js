@@ -2,10 +2,11 @@
  * @fileoverview Default IpTrackingStore (see core/ports.js), backed by
  * Prisma's `ipTracking` table.
  *
- * Extracted from core/mitigation.js (which read/wrote this table to
- * enforce BLOCK verdicts) and middleware/ipWhitelistMiddleware.js (which
- * wrote it directly when a disallowed network origin was rejected). Both
- * now call this one class instead.
+ * Extracted from core/mitigation.js, which reads and writes this table to
+ * enforce BLOCK verdicts and is now its only caller.
+ * middleware/ipWhitelistMiddleware.js used to write it too, blocking a
+ * disallowed network origin's whole address; it no longer does - see its
+ * recordIntrusion().
  */
 export class PrismaIpTrackingStore {
     /** @param {import("@prisma/client").PrismaClient} prisma */

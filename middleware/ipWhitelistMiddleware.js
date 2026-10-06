@@ -1,4 +1,3 @@
-import { securityConfig } from "../config/securityConfig.js";
 import { isWhitelistEnabled, parseAllowedAdminNetworks, isAllowedAdminIp } from "../config/adminNetworks.js";
 import { getIntrusionScore } from "../core/scorer.js";
 import { normalizeIp, readLoginPortal } from "./clientIdentity.js";
@@ -14,10 +13,12 @@ import { normalizeIp, readLoginPortal } from "./clientIdentity.js";
  * or behavioral score is attempted.
  *
  * This module never imports Prisma (or any other storage client) itself.
- * Persisting a rejected attempt is delegated entirely to the `auditSink`
- * and `ipTrackingStore` ports (see core/ports.js) injected into the two
- * factories below; the default, Prisma-backed implementations are
- * constructed once in server.js via core/weva.js's createWeva().
+ * Recording a rejected attempt is delegated entirely to the `auditSink`
+ * port (see core/ports.js) injected into the two factories below; the
+ * default, Prisma-backed implementation is constructed once in server.js
+ * via core/weva.js's createWeva(). It no longer takes WEVA's
+ * `ipTrackingStore`: a refusal here blocks nothing beyond the request
+ * itself - see recordIntrusion() for why.
  * `isEnabled()`/`getAllowedNetworks()` still
  * read `process.env` directly further down - that is deliberate and
  * unrelated to storage: they are the *policy* (is enforcement on, and
@@ -104,40 +105,62 @@ function rejectDisallowedIp(res) {
 }
 
 /**
- * Persists a blocked network-origin attempt via the injected `auditSink`
- * and `ipTrackingStore` (see core/ports.js), scored via
- * core/scorer.js#getIntrusionScore(). Marking the offending identifier
- * blocked in `ipTrackingStore` means a disallowed IP that reaches a
- * *different*, non-admin-gated route after this rejection (e.g. the
- * student portal) is still caught there for the remainder of the block
- * window, via core/mitigation.js#applyMitigation - without
- * middleware/securityMiddleware.js needing any awareness that this
- * middleware exists.
+ * Records a refused network-origin attempt via the injected `auditSink`
+ * (see core/ports.js), scored via core/scorer.js#getIntrusionScore().
+ *
+ * It refuses this one request and blocks nothing else. It used to also
+ * block the address in WEVA's ipTrackingStore for 60 s
+ * (securityConfig.mitigation.temporaryBlockMs), so that whoever probed the
+ * Admin Portal from outside was refused on the Student Portal too:
+ * core/mitigation.js#applyMitigation refuses a sign-in if ANY of its
+ * identities is blocked, and the address is one of them. But an address is
+ * rarely one person. Mobile data runs behind carrier-grade NAT, a boarding
+ * house shares one connection, and so does a conference venue. One request
+ * to the Admin Portal from anyone there refused every student sign-in from
+ * that address for 60 s, and one request a minute kept it that way - a
+ * denial of service any bystander could trigger. It also broke the rule
+ * core/mitigation.js follows everywhere else: block only the identity whose
+ * own behavior earned the verdict. Here none did - the address is shared,
+ * and the device ID is the client's to choose. It is the same mistake as
+ * the campus lockout cascade core/ipAttempts.js documents: a shared address
+ * paying for one person's attempts.
+ *
+ * Nothing is lost by dropping it:
+ *
+ *   - The Admin Portal needs no block to stay closed. This gate checks every
+ *     request against ALLOWED_ADMIN_IPS, so an outside address is refused on
+ *     its next request, and its hundredth, for as long as it is not on the
+ *     list - a standing policy rather than a 60 s timer.
+ *   - The Student Portal never needed it. Someone who goes on to guess
+ *     passwords there is scored by WEVA like anyone else: by their device,
+ *     and by the address's 30 s window of attempts that reach the password
+ *     check.
+ *   - The attempt is still recorded at CRITICAL, so it still appears on the
+ *     Security Logs table.
  *
  * Recorded against `userEmail: 'unauthenticated'`, matching how
  * middleware/securityMiddleware.js already attributes every pre-auth WEVA
  * event - an unauthorized network origin has, by definition, no
- * authenticated identity yet to attribute it to.
+ * authenticated identity yet to attribute it to. A failed write is logged,
+ * never thrown: the refusal must still be sent.
  *
  * @param {import("../core/ports.js").AuditSink} auditSink
- * @param {import("../core/ports.js").IpTrackingStore} ipTrackingStore
  * @param {string} ip - The normalized, disallowed IP that made the request.
  * @param {string} path - The full path it attempted to reach.
  * @returns {Promise<void>}
  */
-async function recordIntrusion(auditSink, ipTrackingStore, ip, path) {
+async function recordIntrusion(auditSink, ip, path) {
     const { score, breakdown } = getIntrusionScore(`disallowed network origin ${ip} reached ${path}`);
-    const blockedUntil = new Date(Date.now() + securityConfig.mitigation.temporaryBlockMs);
 
-    // Deliberately includes the literal word "BLOCK": public/admin_dashboard.js's
-    // fetchLogs() colors a log row's badge red when its description contains
-    // that substring (mirroring how middleware/securityMiddleware.js's own
-    // BLOCK verdicts already read "Device X triggered BLOCK | ..."), so this
-    // event renders with the same visual severity on the Security Logs table.
-    const description = `IP ${ip} triggered BLOCK (unauthorized network origin - admin portal is Campus-Intranet-restricted) | ${breakdown.formula}`;
+    // Starts "IP <ip> triggered BLOCK" - the fixed shape
+    // middleware/securityMiddleware.js#readVerdict reads a verdict from, so
+    // the Security Logs table badges this row red like any other BLOCK.
+    // BLOCK is this request's verdict; the parenthesis says that, unlike a
+    // WEVA BLOCK, it leaves no standing block on the address.
+    const description = `IP ${ip} triggered BLOCK (unauthorized network origin - admin portal is Campus-Intranet-restricted; request refused, address not blocked) | ${breakdown.formula}`;
 
-    const results = await Promise.allSettled([
-        auditSink.recordEvaluation({
+    try {
+        await auditSink.recordEvaluation({
             userEmail: 'unauthenticated',
             userId: null,
             score,
@@ -145,16 +168,10 @@ async function recordIntrusion(auditSink, ipTrackingStore, ip, path) {
             actionTaken: 'BLOCK',
             reason: description,
             eventType: 'NETWORK_ACCESS_DENIED'
-        }),
-        ipTrackingStore.block(ip, blockedUntil)
-    ]);
-
-    const labels = ['auditSink.recordEvaluation', 'ipTrackingStore.block'];
-    results.forEach((result, i) => {
-        if (result.status === 'rejected') {
-            console.error(`[ipWhitelistMiddleware] ${labels[i]} failed:`, result.reason.message);
-        }
-    });
+        });
+    } catch (err) {
+        console.error('[ipWhitelistMiddleware] auditSink.recordEvaluation failed:', err.message);
+    }
 }
 
 /**
@@ -165,10 +182,9 @@ async function recordIntrusion(auditSink, ipTrackingStore, ip, path) {
  *
  * @param {object} deps
  * @param {import("../core/ports.js").AuditSink} deps.auditSink
- * @param {import("../core/ports.js").IpTrackingStore} deps.ipTrackingStore
  * @returns {import("express").RequestHandler}
  */
-export function createIpWhitelistMiddleware({ auditSink, ipTrackingStore }) {
+export function createIpWhitelistMiddleware({ auditSink }) {
     return async function ipWhitelistMiddleware(req, res, next) {
         if (!isEnabled()) return next();
 
@@ -180,7 +196,7 @@ export function createIpWhitelistMiddleware({ auditSink, ipTrackingStore }) {
         // POST /api/verify-otp), where req.path alone would already be
         // stripped of the "/api" mount prefix - see the identical reasoning
         // (and the bug it previously caused) in middleware/securityMiddleware.js.
-        await recordIntrusion(auditSink, ipTrackingStore, requestIp, req.baseUrl + req.path);
+        await recordIntrusion(auditSink, requestIp, req.baseUrl + req.path);
         rejectDisallowedIp(res);
     };
 }
@@ -211,10 +227,9 @@ export function createIpWhitelistMiddleware({ auditSink, ipTrackingStore }) {
  *
  * @param {object} deps
  * @param {import("../core/ports.js").AuditSink} deps.auditSink
- * @param {import("../core/ports.js").IpTrackingStore} deps.ipTrackingStore
  * @returns {import("express").RequestHandler}
  */
-export function createIpWhitelistForAdminLogin({ auditSink, ipTrackingStore }) {
+export function createIpWhitelistForAdminLogin({ auditSink }) {
     return async function ipWhitelistForAdminLogin(req, res, next) {
         if (!isEnabled()) return next();
         if (readLoginPortal(req) !== 'admin') return next();
@@ -222,7 +237,7 @@ export function createIpWhitelistForAdminLogin({ auditSink, ipTrackingStore }) {
         const requestIp = normalizeIp(req.ip);
         if (isAllowedAdminIp(getAllowedNetworks(), requestIp)) return next();
 
-        await recordIntrusion(auditSink, ipTrackingStore, requestIp, req.baseUrl + req.path);
+        await recordIntrusion(auditSink, requestIp, req.baseUrl + req.path);
         rejectDisallowedIp(res);
     };
 }

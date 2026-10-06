@@ -4,7 +4,8 @@ import { readDeviceId, getClientIdentity, accountKey, parseAccountKey, normalize
 const withHeader = (value, ip = '203.0.113.20') => ({ headers: { 'x-device-id': value }, ip });
 
 describe('readDeviceId', () => {
-    it('accepts the browser fingerprint format and the load test\'s IDs', () => {
+    it('accepts the browser\'s random device ID, the old fingerprint format and the load test\'s IDs', () => {
+        expect(readDeviceId(withHeader('DEV-9f86d081884c7d659a2feaa0c55ad015'))).toBe('DEV-9f86d081884c7d659a2feaa0c55ad015');
         expect(readDeviceId(withHeader('DEV-1a2b3c4d'))).toBe('DEV-1a2b3c4d');
         expect(readDeviceId(withHeader('k6-mueeocyw-bot-1'))).toBe('k6-mueeocyw-bot-1');
     });
