@@ -5,13 +5,15 @@
  * successful login) and server.js (which lists and lifts blocks) can never
  * disagree about which key a request belongs to.
  *
- *   - deviceId: the client-supplied `x-device-id` header - the browser
- *     fingerprint public/*.js sends ("DEV-" plus up to 8 hex digits). It
- *     tells apart many users behind one shared IP, but the client controls
- *     it completely.
+ *   - deviceId: the client-supplied `x-device-id` header - the random ID
+ *     public/*.js creates once per browser ("DEV-" plus 32 hex digits; see
+ *     getDeviceId() in public/script.js). It tells apart many users behind
+ *     one shared IP, but the client controls it completely. It used to be a
+ *     hash of browser settings, which identical lab PCs and phones shared -
+ *     merging their failure histories into one.
  *   - ip: the server-observed address (req.ip), normalized the same way
  *     middleware/ipWhitelistMiddleware.js normalizes the addresses it
- *     blocks. Only as trustworthy as server.js's `trust proxy` setting:
+ *     checks. Only as trustworthy as server.js's `trust proxy` setting:
  *     that must match the number of proxies in front of the app, or req.ip
  *     is a proxy's address rather than the client's.
  *   - account key ("user:<id>"): the signed-in account, for authenticated

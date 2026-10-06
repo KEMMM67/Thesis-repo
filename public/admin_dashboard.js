@@ -73,30 +73,40 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
         return `${escapeHtml(narrative)}<br><code class="score-formula">${escapeHtml(formula)}</code>`;
     }
 
-    /**
-     * Derives the same per-device fingerprint as public/script.js.
-     * Duplicated rather than imported, since this page is self-contained
-     * and script.js assumes a #loginForm exists on its host page.
-     * Recomputed on each call - a cheap, pure, local computation.
-     *
-     * @returns {Promise<string>} Device identifier, prefixed "DEV-".
-     */
-    async function getDeviceFingerprint() {
-        const data = [
-            navigator.userAgent,
-            navigator.language,
-            screen.colorDepth,
-            screen.width + 'x' + screen.height,
-            new Date().getTimezoneOffset()
-        ].join('|');
+    /** Where this browser's device ID is kept - the same key public/script.js and admin_login.js use. */
+    const DEVICE_ID_KEY = 'sis.deviceId';
+    const DEVICE_ID_FORMAT = /^DEV-[0-9a-f]{32}$/;
+    let pageDeviceId = null;
 
-        let hash = 0;
-        for (let i = 0; i < data.length; i++) {
-            const char = data.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
+    /**
+     * Returns this browser's random device ID, creating it on first use -
+     * the same as getDeviceId() in public/script.js, which explains why it
+     * is random rather than a browser fingerprint. Duplicated rather than
+     * imported, since this page is self-contained and script.js assumes a
+     * #loginForm exists on its host page. It is the ID this browser signed
+     * in with on admin_login.html, which is what lets the Blocked Devices
+     * panel recognise this admin's own device.
+     *
+     * @returns {string} "DEV-" and 32 hex digits.
+     */
+    function getDeviceId() {
+        try {
+            const stored = localStorage.getItem(DEVICE_ID_KEY);
+            if (DEVICE_ID_FORMAT.test(stored)) return stored;
+            const created = randomDeviceId();
+            localStorage.setItem(DEVICE_ID_KEY, created);
+            return created;
+        } catch {
+            // Storage blocked: keep one ID for the life of this page instead.
+            if (!pageDeviceId) pageDeviceId = randomDeviceId();
+            return pageDeviceId;
         }
-        return "DEV-" + Math.abs(hash).toString(16);
+    }
+
+    /** @returns {string} "DEV-" and 128 random bits as 32 hex digits. */
+    function randomDeviceId() {
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        return 'DEV-' + Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
     }
 
     // =============================================================
@@ -296,7 +306,7 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
             return new Promise(() => {}); // navigation is already underway
         }
 
-        const deviceId = await getDeviceFingerprint();
+        const deviceId = getDeviceId();
 
         const response = await fetch(`${API_BASE}${path}`, {
             ...options,
@@ -382,7 +392,7 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
      * used on the login pages (public/admin_login.js#startCountdown) -
      * kept as a self-contained duplicate here rather than shared, matching
      * this dashboard's existing precedent of duplicating small helpers
-     * (e.g. getDeviceFingerprint()) rather than importing from another
+     * (e.g. getDeviceId()) rather than importing from another
      * page's script.
      *
      * @param {HTMLButtonElement} button
@@ -1707,7 +1717,7 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
             // real remaining time (from the row's own blockedUntil) rather
             // than a generic error.
             const accountEmail = row.dataset.accountEmail;
-            const ownDeviceId = await getDeviceFingerprint();
+            const ownDeviceId = getDeviceId();
             const isOwn = accountEmail ? accountEmail === localStorage.getItem(ADMIN_SESSION.email) : identifier === ownDeviceId;
             if (isOwn) {
                 const blockedUntil = row.dataset.blockedUntil ? new Date(row.dataset.blockedUntil) : null;

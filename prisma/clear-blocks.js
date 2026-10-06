@@ -2,7 +2,7 @@
 import prisma from '../config/prisma.js';
 
 // Break-glass unblock for an operator locked out of the admin dashboard's Blocked
-// Devices panel: clears every active WEVA / IP-whitelist block record. It needs the
+// Devices panel: clears every active WEVA block record. It needs the
 // database credentials, so only someone who already controls the system can use it:
 //   DATABASE_URL="<rds url>" node prisma/clear-blocks.js
 // WEVA's in-memory history (per-device attempt counts, per-IP 30 s windows) lives

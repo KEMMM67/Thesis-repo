@@ -7,7 +7,7 @@
  * pages (public/script.js): only admin accounts go through the OTP step,
  * so folding it into the shared script would mean every page loading it
  * carries OTP-handling code that can only ever run on this one page. A
- * handful of small helpers below (getDeviceFingerprint, showMessage) are
+ * handful of small helpers below (getDeviceId, showMessage) are
  * intentionally duplicated from script.js rather than imported, matching
  * the existing precedent in public/admin_dashboard.js of each dashboard
  * script being self-contained.
@@ -98,31 +98,38 @@ let pendingOtpPassword = null;
 /** Interval id of whichever countdown (THROTTLE or BLOCK) is currently running, so a step change (e.g. "Back to login") can cancel a stale timer instead of leaving it to fire against a hidden form later. */
 let activeCountdownTimer = null;
 
-/**
- * Derives a stable per-device identifier from browser/hardware
- * characteristics, so the behavioral security layer can track a device
- * across requests even if its IP address changes (e.g. via a VPN). Used
- * for both POST /api/login and POST /api/verify-otp so WEVA attributes
- * both steps of one login to the same device (see core/monitor.js).
- *
- * @returns {Promise<string>} Device identifier, prefixed "DEV-".
- */
-async function getDeviceFingerprint() {
-    const data = [
-        navigator.userAgent,
-        navigator.language,
-        screen.colorDepth,
-        screen.width + 'x' + screen.height,
-        new Date().getTimezoneOffset()
-    ].join('|');
+/** Where this browser's device ID is kept - the same key public/script.js and both dashboards use. */
+const DEVICE_ID_KEY = 'sis.deviceId';
+const DEVICE_ID_FORMAT = /^DEV-[0-9a-f]{32}$/;
+let pageDeviceId = null;
 
-    let hash = 0;
-    for (let i = 0; i < data.length; i++) {
-        const char = data.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash;
+/**
+ * Returns this browser's random device ID, creating it on first use - the
+ * same as getDeviceId() in public/script.js, which explains why it is random
+ * rather than a browser fingerprint. Used for both POST /api/login and
+ * POST /api/verify-otp, so WEVA attributes both steps of one login to the
+ * same device (see core/monitor.js).
+ *
+ * @returns {string} "DEV-" and 32 hex digits.
+ */
+function getDeviceId() {
+    try {
+        const stored = localStorage.getItem(DEVICE_ID_KEY);
+        if (DEVICE_ID_FORMAT.test(stored)) return stored;
+        const created = randomDeviceId();
+        localStorage.setItem(DEVICE_ID_KEY, created);
+        return created;
+    } catch {
+        // Storage blocked: keep one ID for the life of this page instead.
+        if (!pageDeviceId) pageDeviceId = randomDeviceId();
+        return pageDeviceId;
     }
-    return "DEV-" + Math.abs(hash).toString(16);
+}
+
+/** @returns {string} "DEV-" and 128 random bits as 32 hex digits. */
+function randomDeviceId() {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return 'DEV-' + Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 /**
@@ -318,7 +325,7 @@ loginForm.addEventListener('submit', async function (event) {
     setLoading(loginBtn, true, "Sending Code...");
 
     try {
-        const deviceId = await getDeviceFingerprint();
+        const deviceId = getDeviceId();
 
         // x-device-id is pre-auth telemetry for the behavioral layer, not
         // an identity assertion; the server never trusts client-supplied
@@ -414,7 +421,7 @@ otpForm.addEventListener('submit', async function (event) {
     setLoading(verifyBtn, true, "Verifying...");
 
     try {
-        const deviceId = await getDeviceFingerprint();
+        const deviceId = getDeviceId();
 
         const response = await fetch('/api/verify-otp', {
             method: 'POST',
@@ -484,7 +491,7 @@ resendOtpBtn.addEventListener('click', async () => {
     setLoading(resendOtpBtn, true, "Sending...");
 
     try {
-        const deviceId = await getDeviceFingerprint();
+        const deviceId = getDeviceId();
 
         const response = await fetch('/api/login', {
             method: 'POST',

@@ -61,30 +61,38 @@ if (!localStorage.getItem(STUDENT_SESSION.token)) {
         return '₱' + value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
-    /**
-     * Derives the same per-device fingerprint as public/script.js and
-     * public/admin_dashboard.js. Duplicated rather than imported, since
-     * this page is self-contained - consistent with the same choice
-     * made in admin_dashboard.js.
-     *
-     * @returns {Promise<string>} Device identifier, prefixed "DEV-".
-     */
-    async function getDeviceFingerprint() {
-        const data = [
-            navigator.userAgent,
-            navigator.language,
-            screen.colorDepth,
-            screen.width + 'x' + screen.height,
-            new Date().getTimezoneOffset()
-        ].join('|');
+    /** Where this browser's device ID is kept - the same key public/script.js and the admin pages use. */
+    const DEVICE_ID_KEY = 'sis.deviceId';
+    const DEVICE_ID_FORMAT = /^DEV-[0-9a-f]{32}$/;
+    let pageDeviceId = null;
 
-        let hash = 0;
-        for (let i = 0; i < data.length; i++) {
-            const char = data.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
+    /**
+     * Returns this browser's random device ID, creating it on first use -
+     * the same as getDeviceId() in public/script.js, which explains why it
+     * is random rather than a browser fingerprint. Duplicated rather than
+     * imported, since this page is self-contained - consistent with the
+     * same choice made in admin_dashboard.js.
+     *
+     * @returns {string} "DEV-" and 32 hex digits.
+     */
+    function getDeviceId() {
+        try {
+            const stored = localStorage.getItem(DEVICE_ID_KEY);
+            if (DEVICE_ID_FORMAT.test(stored)) return stored;
+            const created = randomDeviceId();
+            localStorage.setItem(DEVICE_ID_KEY, created);
+            return created;
+        } catch {
+            // Storage blocked: keep one ID for the life of this page instead.
+            if (!pageDeviceId) pageDeviceId = randomDeviceId();
+            return pageDeviceId;
         }
-        return "DEV-" + Math.abs(hash).toString(16);
+    }
+
+    /** @returns {string} "DEV-" and 128 random bits as 32 hex digits. */
+    function randomDeviceId() {
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        return 'DEV-' + Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
     }
 
     /**
@@ -117,7 +125,7 @@ if (!localStorage.getItem(STUDENT_SESSION.token)) {
             return new Promise(() => {}); // navigation is already underway
         }
 
-        const deviceId = await getDeviceFingerprint();
+        const deviceId = getDeviceId();
 
         const response = await fetch(`${API_BASE}${path}`, {
             ...options,

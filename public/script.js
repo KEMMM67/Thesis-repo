@@ -4,29 +4,59 @@ const messageBox = document.getElementById('loginMessage');
 
 const LOGIN_IDLE_LABEL = 'Login';
 
-/**
- * Derives a stable per-device identifier from browser/hardware
- * characteristics, so the behavioral security layer can track a device
- * across requests even if its IP address changes (e.g. via a VPN).
- *
- * @returns {Promise<string>} Device identifier, prefixed "DEV-".
- */
-async function getDeviceFingerprint() {
-    const data = [
-        navigator.userAgent,
-        navigator.language,
-        screen.colorDepth,
-        screen.width + 'x' + screen.height,
-        new Date().getTimezoneOffset()
-    ].join('|');
+/** Where this browser's device ID is kept. One origin, one localStorage: every page of both portals shares it. */
+const DEVICE_ID_KEY = 'sis.deviceId';
+const DEVICE_ID_FORMAT = /^DEV-[0-9a-f]{32}$/;
+let pageDeviceId = null;
 
-    let hash = 0;
-    for (let i = 0; i < data.length; i++) {
-        const char = data.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash;
+/**
+ * Returns this browser's device ID for WEVA's device layer (the x-device-id
+ * header): "DEV-" and 32 random hex digits, created on first use and kept in
+ * localStorage, so it stays the same across visits and across every page.
+ * public/admin_login.js and both dashboards keep identical copies.
+ *
+ * Why random. It used to be a hash of the user agent, language, color depth,
+ * screen size and timezone - identical on every PC of a computer lab, and on
+ * every phone of one model running the same browser version. Everyone who
+ * shared a value shared one failure history, and the device layer counts
+ * refused attempts too and keeps them until a success settles them. Worked
+ * example: four students at identical lab PCs have each mistyped once and
+ * not yet retyped. The next student's first attempt scores
+ * 2 x 2 x (1 + 4 x 0.5) x 5 = 60 - THROTTLE - and that refusal is recorded
+ * as a fifth failure. The four then retype correctly, but are refused before
+ * their passwords are checked, so nothing settles and the whole lab climbs
+ * to BLOCK together. Random IDs never collide, which is the one property
+ * the device layer needs from them.
+ *
+ * Nothing is lost: the header was always chosen by the client, so it was
+ * never a security boundary. A bot that rotates IDs is stopped by the IP
+ * layer, and signed-in requests by the account layer
+ * (middleware/securityMiddleware.js). And unlike a fingerprint, clearing the
+ * site's data resets it.
+ *
+ * crypto.getRandomValues() rather than crypto.randomUUID(), which browsers
+ * only provide over HTTPS: a LAN demo served over plain HTTP must work too.
+ *
+ * @returns {string} e.g. "DEV-9f86d081884c7d659a2feaa0c55ad015".
+ */
+function getDeviceId() {
+    try {
+        const stored = localStorage.getItem(DEVICE_ID_KEY);
+        if (DEVICE_ID_FORMAT.test(stored)) return stored;
+        const created = randomDeviceId();
+        localStorage.setItem(DEVICE_ID_KEY, created);
+        return created;
+    } catch {
+        // Storage blocked: keep one ID for the life of this page instead.
+        if (!pageDeviceId) pageDeviceId = randomDeviceId();
+        return pageDeviceId;
     }
-    return "DEV-" + Math.abs(hash).toString(16);
+}
+
+/** @returns {string} "DEV-" and 128 random bits as 32 hex digits. */
+function randomDeviceId() {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return 'DEV-' + Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 /**
@@ -148,8 +178,8 @@ loginForm.addEventListener('submit', async function(event) {
     setLoading(true);
 
     try {
-        const deviceId = await getDeviceFingerprint();
-        console.log("Device Signature Acquired:", deviceId);
+        const deviceId = getDeviceId();
+        console.log("Device ID:", deviceId);
 
         // x-device-id is pre-auth telemetry for the behavioral layer, not an
         // identity assertion; the server never trusts client-supplied identity.
