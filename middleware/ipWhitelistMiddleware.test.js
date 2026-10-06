@@ -64,6 +64,22 @@ describe('createIpWhitelistForAdminLogin', () => {
         expect((await attempt(gate, { ip: '::ffff:10.0.0.5', email: 'real-admin@x.edu.ph', portal: 'admin' })).passed).toBe(true);
     });
 
+    it('lets the Admin Portal through from anywhere in a whitelisted range, and refuses the next one over', async () => {
+        process.env.ALLOWED_ADMIN_IPS = '127.0.0.1, 203.0.113.0/24';
+        const { gate, intrusions } = buildGate();
+        for (const ip of ['203.0.113.17', '203.0.113.42', '::ffff:203.0.113.99']) {
+            expect((await attempt(gate, { ip, email: 'real-admin@x.edu.ph', portal: 'admin' })).passed).toBe(true);
+        }
+        expect((await attempt(gate, { ip: '203.0.114.1', email: 'real-admin@x.edu.ph', portal: 'admin' })).passed).toBe(false);
+        expect(intrusions).toHaveLength(1);
+    });
+
+    it('refuses everyone when the only entry is a range too broad to accept', async () => {
+        process.env.ALLOWED_ADMIN_IPS = '0.0.0.0/0';
+        const { gate } = buildGate();
+        expect((await attempt(gate, { ip: '203.0.113.50', email: 'real-admin@x.edu.ph', portal: 'admin' })).passed).toBe(false);
+    });
+
     it('enforces nothing while the whitelist is switched off', async () => {
         process.env.ENABLE_IP_WHITELIST = 'false';
         const { gate } = buildGate();

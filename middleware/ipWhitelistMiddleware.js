@@ -1,4 +1,5 @@
 import { securityConfig } from "../config/securityConfig.js";
+import { isWhitelistEnabled, parseAllowedAdminNetworks, isAllowedAdminIp } from "../config/adminNetworks.js";
 import { getIntrusionScore } from "../core/scorer.js";
 import { normalizeIp, readLoginPortal } from "./clientIdentity.js";
 
@@ -17,7 +18,7 @@ import { normalizeIp, readLoginPortal } from "./clientIdentity.js";
  * and `ipTrackingStore` ports (see core/ports.js) injected into the two
  * factories below; the default, Prisma-backed implementations are
  * constructed once in server.js via core/weva.js's createWeva().
- * `isEnabled()`/`getAllowedIps()` still
+ * `isEnabled()`/`getAllowedNetworks()` still
  * read `process.env` directly further down - that is deliberate and
  * unrelated to storage: they are the *policy* (is enforcement on, and
  * from where), not a database dependency, and this file reading its own
@@ -29,8 +30,8 @@ import { normalizeIp, readLoginPortal } from "./clientIdentity.js";
  * demo where getting it wrong means losing access to the thing being
  * demonstrated:
  *
- *   1. isEnabled() and getAllowedIps() read process.env fresh on every
- *      call rather than caching a decision at module load - flipping
+ *   1. isEnabled() and getAllowedNetworks() read process.env fresh on
+ *      every call rather than caching a decision at module load - flipping
  *      ENABLE_IP_WHITELIST in .env and restarting the server is the
  *      *only* step needed to disable enforcement entirely, with no other
  *      state to reset.
@@ -44,6 +45,12 @@ import { normalizeIp, readLoginPortal } from "./clientIdentity.js";
  *      and without normalizing it, the shipped default
  *      ALLOWED_ADMIN_IPS=127.0.0.1,::1 could fail to match the
  *      developer's own machine.
+ *
+ * ALLOWED_ADMIN_IPS takes CIDR ranges as well as single addresses
+ * ("203.0.113.0/24"), because a venue's network can reach the internet
+ * through more than one public IP. Parsing, the limits that stop a typo
+ * from widening access, and the startup log line live in
+ * config/adminNetworks.js.
  *
  * Two exports, for two different situations:
  *
@@ -64,20 +71,17 @@ import { normalizeIp, readLoginPortal } from "./clientIdentity.js";
  */
 
 /**
- * @returns {boolean} Whether whitelist enforcement is currently active. Anything other than the literal string "true" (case-insensitive) - including the variable being unset - is treated as disabled, so a missing or malformed .env value fails open rather than locking every admin out.
+ * @returns {boolean} Whether whitelist enforcement is currently active - see config/adminNetworks.js#isWhitelistEnabled for why anything but "true" means off.
  */
 function isEnabled() {
-    return (process.env.ENABLE_IP_WHITELIST || '').trim().toLowerCase() === 'true';
+    return isWhitelistEnabled(process.env);
 }
 
 /**
- * @returns {string[]} Normalized ALLOWED_ADMIN_IPS entries. Re-parsed from process.env on every call - see this file's @fileoverview.
+ * @returns {import("node:net").BlockList} The ALLOWED_ADMIN_IPS addresses and ranges as a matcher. Re-parsed from process.env on every call - see this file's @fileoverview. Ignored entries are reported once, at startup (server.js), not here on every request.
  */
-function getAllowedIps() {
-    return (process.env.ALLOWED_ADMIN_IPS || '')
-        .split(',')
-        .map(ip => normalizeIp(ip.trim()))
-        .filter(Boolean);
+function getAllowedNetworks() {
+    return parseAllowedAdminNetworks(process.env.ALLOWED_ADMIN_IPS).blockList;
 }
 
 /**
@@ -169,7 +173,7 @@ export function createIpWhitelistMiddleware({ auditSink, ipTrackingStore }) {
         if (!isEnabled()) return next();
 
         const requestIp = normalizeIp(req.ip);
-        if (getAllowedIps().includes(requestIp)) return next();
+        if (isAllowedAdminIp(getAllowedNetworks(), requestIp)) return next();
 
         // req.baseUrl + req.path, not req.path alone: this middleware is also
         // mounted inside routes/authRoutes.js's sub-router (for
@@ -216,7 +220,7 @@ export function createIpWhitelistForAdminLogin({ auditSink, ipTrackingStore }) {
         if (readLoginPortal(req) !== 'admin') return next();
 
         const requestIp = normalizeIp(req.ip);
-        if (getAllowedIps().includes(requestIp)) return next();
+        if (isAllowedAdminIp(getAllowedNetworks(), requestIp)) return next();
 
         await recordIntrusion(auditSink, ipTrackingStore, requestIp, req.baseUrl + req.path);
         rejectDisallowedIp(res);
