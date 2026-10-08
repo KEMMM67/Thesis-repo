@@ -2,159 +2,419 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#f4f5f7">
     <title>Student Portal | SIS</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+    <link rel="stylesheet" href="student-style.css">
 </head>
-<body class="dashboard-body">
+<body class="student-portal">
+    <a class="skip-link" href="#main-content">Skip to content</a>
 
-    <div class="topbar">
-        <div class="logo"><i class="fa-solid fa-graduation-cap"></i> STUDENT INFORMATION SYSTEM</div>
-        <div class="user-info">
-            <span class="user-chip"><i class="fa-solid fa-user-graduate"></i> <span id="topbarUserName">Student</span> <span class="role-tag">STUDENT</span></span>
-            <a href="index.html" id="btnLogout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
-        </div>
+    <!-- Icon sprite: every icon on this page is a <use> of one of these symbols. -->
+    <svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+        <symbol id="i-cap" viewBox="0 0 24 24"><path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c0 1.66 2.69 3 6 3s6-1.34 6-3v-5"/></symbol>
+        <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"/></symbol>
+        <symbol id="i-book" viewBox="0 0 24 24"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2Z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7Z"/></symbol>
+        <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></symbol>
+        <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M6 17v-6M12 17V5M18 17v-8"/></symbol>
+        <symbol id="i-card" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></symbol>
+        <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.4 8.4 8 9 4.6-.6 8-4 8-9V6Z"/><path d="m9 12 2 2 4-4"/></symbol>
+        <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+        <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></symbol>
+        <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.25"/><circle cx="12" cy="12" r="1.25"/><circle cx="19" cy="12" r="1.25"/></symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+        <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-7-6.1-7-11.5a7 7 0 0 1 14 0C19 14.9 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/></symbol>
+        <symbol id="i-award" viewBox="0 0 24 24"><circle cx="12" cy="9" r="6"/><path d="m8.5 14.5-1.5 7 5-3 5 3-1.5-7"/></symbol>
+        <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+        <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+        <symbol id="i-printer" viewBox="0 0 24 24"><path d="M6 9V3h12v6"/><rect x="6" y="14" width="12" height="7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/></symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    </svg>
+
+    <div class="app">
+        <!-- Desktop navigation (900px and wider). Phones get the tab bar at the bottom instead. -->
+        <aside class="sidebar" aria-label="Student portal">
+            <div class="brand">
+                <span class="brand__mark"><svg class="ic" aria-hidden="true"><use href="#i-cap"></use></svg></span>
+                <span class="brand__text"><strong>SIS</strong><span>Student Portal</span></span>
+            </div>
+            <nav aria-label="Main navigation">
+                <ul class="nav-list" id="sidebar-nav">
+                    <li><a class="nav-item is-active" href="#home" data-section="section-home" aria-current="page"><svg class="ic" aria-hidden="true"><use href="#i-home"></use></svg><span class="nav-label">Home</span></a></li>
+                    <li><a class="nav-item" href="#courses" data-section="section-courses"><svg class="ic" aria-hidden="true"><use href="#i-book"></use></svg><span class="nav-label">My Courses</span></a></li>
+                    <li><a class="nav-item" href="#schedule" data-section="section-schedule"><svg class="ic" aria-hidden="true"><use href="#i-calendar"></use></svg><span class="nav-label">Schedule</span></a></li>
+                    <li><a class="nav-item" href="#grades" data-section="section-grades"><svg class="ic" aria-hidden="true"><use href="#i-chart"></use></svg><span class="nav-label">Grades</span></a></li>
+                    <li><a class="nav-item" href="#account" data-section="section-billing"><svg class="ic" aria-hidden="true"><use href="#i-card"></use></svg><span class="nav-label">Account</span></a></li>
+                    <li><a class="nav-item" href="#clearance" data-section="section-clearance"><svg class="ic" aria-hidden="true"><use href="#i-shield"></use></svg><span class="nav-label">Clearance</span></a></li>
+                    <li><a class="nav-item" href="#profile" data-section="section-profile"><svg class="ic" aria-hidden="true"><use href="#i-user"></use></svg><span class="nav-label">Profile</span></a></li>
+                </ul>
+            </nav>
+            <div class="user-card">
+                <span class="avatar avatar--sm" id="sidebarAvatar" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#i-user"></use></svg></span>
+                <span class="user-card__text"><strong id="sidebarUserName">Student</strong><span id="sidebarUserId">&nbsp;</span></span>
+                <a class="icon-btn" href="index.html" id="btnLogout" aria-label="Sign out" title="Sign out"><svg class="ic" aria-hidden="true"><use href="#i-logout"></use></svg></a>
+            </div>
+        </aside>
+
+        <main class="main">
+            <div class="page">
+                <header class="page-head">
+                    <a class="avatar avatar--head page-head__avatar" id="headAvatar" href="#profile" data-section="section-profile" aria-label="Open your profile"><svg class="ic" aria-hidden="true"><use href="#i-user"></use></svg></a>
+                    <div class="page-head__text">
+                        <h1 id="main-title">Welcome back</h1>
+                        <p class="page-head__sub" id="main-subtitle">Here’s your semester at a glance.</p>
+                    </div>
+                    <span class="chip chip--term" id="termChip"><svg class="ic" aria-hidden="true"><use href="#i-calendar"></use></svg><span id="termChipText">Loading&hellip;</span></span>
+                </header>
+
+                <div class="sections" id="main-content" tabindex="-1">
+
+                    <!-- ===================== HOME ===================== -->
+                    <section class="section-container" id="section-home" aria-label="Home">
+                        <div class="hero">
+                            <article class="card card--profile" aria-label="Student summary">
+                                <span class="avatar avatar--lg" id="homeAvatar" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#i-user"></use></svg></span>
+                                <div class="profile-summary">
+                                    <p class="profile-summary__name" id="homeName">Loading&hellip;</p>
+                                    <p class="profile-summary__meta" id="homeMeta">&nbsp;</p>
+                                    <div class="chips" id="homeChips"></div>
+                                </div>
+                            </article>
+                            <article class="card card--next" id="nextClass" aria-label="Next class">
+                                <div class="next__top"><span class="next__eyebrow">Next class</span><span class="chip chip--on-brand">Sample schedule</span></div>
+                                <span class="skel skel--lg"></span>
+                                <span class="skel skel--md"></span>
+                            </article>
+                        </div>
+
+                        <div class="kpi-grid">
+                            <article class="kpi">
+                                <div class="kpi__head"><p class="kpi__label">GWA</p><svg class="ic kpi__icon" aria-hidden="true"><use href="#i-award"></use></svg></div>
+                                <p class="kpi__value" id="statGwa">&mdash;</p>
+                                <div class="scale" aria-hidden="true">
+                                    <div class="scale__track"><span class="scale__fill" id="statGwaBar"></span><span class="scale__pass"></span></div>
+                                    <div class="scale__labels"><span>5.00</span><span>3.00 pass</span><span>1.00</span></div>
+                                </div>
+                            </article>
+                            <article class="kpi">
+                                <div class="kpi__head"><p class="kpi__label">Enrolled units</p><svg class="ic kpi__icon" aria-hidden="true"><use href="#i-book"></use></svg></div>
+                                <p class="kpi__value" id="statEnrolledUnits">&mdash;</p>
+                                <p class="kpi__note" id="statSubjects">&nbsp;</p>
+                            </article>
+                            <article class="kpi">
+                                <div class="kpi__head"><p class="kpi__label">Standing</p><svg class="ic kpi__icon" aria-hidden="true"><use href="#i-check-circle"></use></svg></div>
+                                <p class="kpi__value kpi__value--text" id="statStanding">&mdash;</p>
+                                <p class="kpi__note">Good standing: a GWA of 3.00 or better</p>
+                            </article>
+                            <article class="kpi">
+                                <div class="kpi__head"><p class="kpi__label">Balance</p><span class="chip chip--sample">Sample</span></div>
+                                <p class="kpi__value" id="statBalance">&mdash;</p>
+                                <p class="kpi__note" id="statBalanceNote">&nbsp;</p>
+                            </article>
+                        </div>
+
+                        <section class="block" aria-labelledby="homeCoursesTitle">
+                            <div class="block__head">
+                                <h2 class="block__title" id="homeCoursesTitle">My courses <span class="block__count" id="homeCoursesCount"></span></h2>
+                                <a class="link-more" href="#courses" data-section="section-courses">View all<svg class="ic" aria-hidden="true"><use href="#i-chevron"></use></svg></a>
+                            </div>
+                            <div class="course-rail" id="homeCourses">
+                                <div class="course course--skeleton" aria-hidden="true"><span class="skel skel--tile"></span><span class="skel skel--sm"></span><span class="skel skel--lg"></span><span class="skel skel--md"></span></div>
+                                <div class="course course--skeleton" aria-hidden="true"><span class="skel skel--tile"></span><span class="skel skel--sm"></span><span class="skel skel--lg"></span><span class="skel skel--md"></span></div>
+                                <div class="course course--skeleton" aria-hidden="true"><span class="skel skel--tile"></span><span class="skel skel--sm"></span><span class="skel skel--lg"></span><span class="skel skel--md"></span></div>
+                            </div>
+                            <p class="note"><svg class="ic" aria-hidden="true"><use href="#i-info"></use></svg><span>Days, times, rooms and instructors are sample data. Subject codes, units and grades are live records.</span></p>
+                        </section>
+
+                        <div class="split">
+                            <section class="card" aria-labelledby="homeWeekTitle">
+                                <div class="card__head">
+                                    <h2 class="card__title" id="homeWeekTitle">This week</h2>
+                                    <span class="chip chip--sample">Sample</span>
+                                    <a class="link-more" href="#schedule" data-section="section-schedule">Schedule<svg class="ic" aria-hidden="true"><use href="#i-chevron"></use></svg></a>
+                                </div>
+                                <div class="week-wrap" id="homeWeek"><span class="skel skel--block"></span></div>
+                                <div class="agenda-wrap" id="homeAgenda" data-agenda><span class="skel skel--block"></span></div>
+                            </section>
+
+                            <section class="card" aria-labelledby="homeGradesTitle">
+                                <div class="card__head">
+                                    <h2 class="card__title" id="homeGradesTitle">Recent grades</h2>
+                                    <a class="link-more" href="#grades" data-section="section-grades">All grades<svg class="ic" aria-hidden="true"><use href="#i-chevron"></use></svg></a>
+                                </div>
+                                <div class="gwa-box">
+                                    <div class="gwa-box__row">
+                                        <p class="gwa-box__value" id="homeGwa">&mdash;</p>
+                                        <div>
+                                            <p class="gwa-box__label">General Weighted Average</p>
+                                            <p class="gwa-box__standing" id="homeStanding">&nbsp;</p>
+                                        </div>
+                                    </div>
+                                    <div class="scale" aria-hidden="true">
+                                        <div class="scale__track"><span class="scale__fill" id="homeGwaBar"></span><span class="scale__pass"></span></div>
+                                        <div class="scale__labels"><span>5.00</span><span>3.00 pass</span><span>1.00</span></div>
+                                    </div>
+                                </div>
+                                <ul class="grade-list" id="homeGradesList">
+                                    <li class="grade-row" aria-hidden="true"><span class="skel skel--tile"></span><span class="skel skel--md"></span></li>
+                                    <li class="grade-row" aria-hidden="true"><span class="skel skel--tile"></span><span class="skel skel--md"></span></li>
+                                    <li class="grade-row" aria-hidden="true"><span class="skel skel--tile"></span><span class="skel skel--md"></span></li>
+                                </ul>
+                            </section>
+                        </div>
+
+                        <div class="split split--even">
+                            <section class="card" aria-labelledby="homeAccountTitle">
+                                <div class="card__head">
+                                    <h2 class="card__title" id="homeAccountTitle">Account</h2>
+                                    <span class="chip chip--sample">Sample</span>
+                                    <a class="link-more" href="#account" data-section="section-billing">Details<svg class="ic" aria-hidden="true"><use href="#i-chevron"></use></svg></a>
+                                </div>
+                                <p class="money" id="homeBalance">&mdash;</p>
+                                <p class="status-text" id="homeBalanceStatus">&nbsp;</p>
+                                <div class="stack-bar" id="homeFeeBar" aria-hidden="true"></div>
+                                <ul class="legend" id="homeFeeLegend"></ul>
+                            </section>
+
+                            <section class="card" aria-labelledby="homeClearanceTitle">
+                                <div class="card__head">
+                                    <h2 class="card__title" id="homeClearanceTitle">Clearance</h2>
+                                    <span class="chip chip--sample">Sample</span>
+                                    <a class="link-more" href="#clearance" data-section="section-clearance">Details<svg class="ic" aria-hidden="true"><use href="#i-chevron"></use></svg></a>
+                                </div>
+                                <p class="money" id="statClearance">&mdash;</p>
+                                <p class="status-text" id="homeClearanceNote">&nbsp;</p>
+                                <div class="seg-bar" id="homeClearanceBar" aria-hidden="true"></div>
+                                <ul class="pill-list" id="homeClearanceList"></ul>
+                            </section>
+                        </div>
+                    </section>
+
+                    <!-- ===================== MY COURSES ===================== -->
+                    <section class="section-container" id="section-courses" aria-label="My courses" hidden>
+                        <section class="block" aria-labelledby="coursesHeading">
+                            <div class="block__head">
+                                <h2 class="block__title" id="coursesHeading">This term</h2>
+                                <span class="block__count" id="coursesSummary"></span>
+                            </div>
+                            <div class="course-grid" id="coursesGrid"><p class="empty">Loading&hellip;</p></div>
+                            <p class="note"><svg class="ic" aria-hidden="true"><use href="#i-info"></use></svg><span>Days, times, rooms and instructors are sample data. Subject codes, units and grades are live records.</span></p>
+                        </section>
+                    </section>
+
+                    <!-- ===================== SCHEDULE ===================== -->
+                    <section class="section-container" id="section-schedule" aria-label="Schedule" hidden>
+                        <p class="notice"><svg class="ic" aria-hidden="true"><use href="#i-info"></use></svg><span>Sample data: class scheduling is outside this system's current scope, so these rows are not live records.</span></p>
+                        <section class="card card--schedule" aria-labelledby="scheduleTitle">
+                            <div class="card__head">
+                                <h2 class="card__title" id="scheduleTitle">Weekly timetable</h2>
+                                <span class="chip chip--sample">Sample</span>
+                            </div>
+                            <div class="week-wrap" id="scheduleWeek"></div>
+                            <div class="agenda-wrap" id="scheduleAgenda" data-agenda></div>
+                        </section>
+                        <section class="card card--flush" aria-labelledby="scheduleListTitle">
+                            <div class="card__head"><h2 class="card__title" id="scheduleListTitle">All classes</h2></div>
+                            <div class="table-wrap">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr><th scope="col">Subject Code</th><th scope="col">Description</th><th scope="col" class="num">Units</th><th scope="col">Day / Time</th><th scope="col">Room</th><th scope="col">Instructor</th></tr>
+                                    </thead>
+                                    <tbody id="scheduleTableBody">
+                                        <tr><td colspan="6">Loading&hellip;</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </section>
+
+                    <!-- ===================== GRADES ===================== -->
+                    <section class="section-container" id="section-grades" aria-label="Grades" hidden>
+                        <!-- Shown only on paper: the letterhead of the printed Report of Grades. -->
+                        <div class="print-only print-head">
+                            <p class="print-head__org">Student Information System · Student Portal</p>
+                            <h2 class="print-head__title">Report of Grades</h2>
+                            <dl class="print-head__meta">
+                                <div><dt>Name</dt><dd id="printName">&mdash;</dd></div>
+                                <div><dt>Student ID</dt><dd id="printStudentId">&mdash;</dd></div>
+                                <div><dt>Program / Year</dt><dd id="printProgram">&mdash;</dd></div>
+                                <div><dt>Term</dt><dd id="printTerm">&mdash;</dd></div>
+                            </dl>
+                        </div>
+
+                        <div class="kpi-grid kpi-grid--3">
+                            <article class="kpi kpi--wide">
+                                <div class="kpi__head"><p class="kpi__label">General Weighted Average</p><svg class="ic kpi__icon" aria-hidden="true"><use href="#i-award"></use></svg></div>
+                                <p class="kpi__value" id="gradesGwa">&mdash;</p>
+                                <div class="scale" aria-hidden="true">
+                                    <div class="scale__track"><span class="scale__fill" id="gradesGwaBar"></span><span class="scale__pass"></span></div>
+                                    <div class="scale__labels"><span>5.00</span><span>3.00 pass</span><span>1.00</span></div>
+                                </div>
+                            </article>
+                            <article class="kpi">
+                                <div class="kpi__head"><p class="kpi__label">Academic standing</p></div>
+                                <p class="kpi__value kpi__value--text" id="gradesStanding">&mdash;</p>
+                                <p class="kpi__note">Good standing: a GWA of 3.00 or better</p>
+                            </article>
+                            <article class="kpi">
+                                <div class="kpi__head"><p class="kpi__label">Subjects graded</p></div>
+                                <p class="kpi__value" id="gradesGraded">&mdash;</p>
+                                <p class="kpi__note" id="gradesGradedNote">&nbsp;</p>
+                            </article>
+                        </div>
+
+                        <div class="filter-bar">
+                            <label class="field" for="gradesTermFilter">
+                                <span class="field__label">Term</span>
+                                <select id="gradesTermFilter">
+                                    <option>Loading&hellip;</option>
+                                </select>
+                            </label>
+                            <button type="button" class="btn btn--primary" id="btnPrintGrades"><svg class="ic" aria-hidden="true"><use href="#i-printer"></use></svg>Print report</button>
+                        </div>
+
+                        <section class="card card--flush" aria-label="Grades by subject">
+                            <div class="table-wrap">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr><th scope="col">Subject Code</th><th scope="col">Subject Title</th><th scope="col" class="num">Units</th><th scope="col" class="num">Grade</th><th scope="col">Remarks</th></tr>
+                                    </thead>
+                                    <tbody id="gradesTableBody">
+                                        <tr><td colspan="5">Loading&hellip;</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+
+                        <section class="card" aria-labelledby="gradingTitle">
+                            <h2 class="card__title" id="gradingTitle">Grading system</h2>
+                            <dl class="legend-grid">
+                                <div><dt>1.00 – 3.00</dt><dd>Passed. 1.00 is the highest grade.</dd></div>
+                                <div><dt>4.00</dt><dd>Conditional failure</dd></div>
+                                <div><dt>5.00</dt><dd>Failed</dd></div>
+                                <div><dt>No grade</dt><dd>Incomplete or dropped; see remarks (e.g. INC)</dd></div>
+                            </dl>
+                        </section>
+
+                        <p class="print-only print-foot"><span id="printFoot">&nbsp;</span><br><span id="printStamp"></span></p>
+                    </section>
+
+                    <!-- ===================== ACCOUNT / BILLING ===================== -->
+                    <section class="section-container" id="section-billing" aria-label="Account" hidden>
+                        <p class="notice"><svg class="ic" aria-hidden="true"><use href="#i-info"></use></svg><span>Sample data: billing and payments are outside this system's current scope, so these figures are not live records.</span></p>
+                        <div class="split split--even">
+                            <section class="card" aria-labelledby="billingBalanceTitle">
+                                <div class="card__head">
+                                    <h2 class="card__title" id="billingBalanceTitle">Total balance due</h2>
+                                    <span class="chip chip--sample">Sample</span>
+                                </div>
+                                <p class="money money--xl" id="billingBalance">&mdash;</p>
+                                <p class="status-text" id="billingStatus"><svg class="ic" aria-hidden="true"><use href="#i-check-circle"></use></svg><span id="billingStatusText">Loading&hellip;</span></p>
+                                <div class="stack-bar" id="billingFeeBar" aria-hidden="true"></div>
+                            </section>
+                            <section class="card card--flush" aria-labelledby="billingFeesTitle">
+                                <div class="card__head"><h2 class="card__title" id="billingFeesTitle">Assessment of fees</h2></div>
+                                <div class="table-wrap">
+                                    <table class="data-table">
+                                        <thead><tr><th scope="col">Fee type</th><th scope="col" class="num">Amount</th></tr></thead>
+                                        <tbody id="billingFeesTableBody">
+                                            <tr><td colspan="2">Loading&hellip;</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+                        </div>
+                        <section class="card card--flush" aria-labelledby="billingPaymentsTitle">
+                            <div class="card__head"><h2 class="card__title" id="billingPaymentsTitle">Payment history</h2></div>
+                            <div class="table-wrap">
+                                <table class="data-table">
+                                    <thead><tr><th scope="col">Date</th><th scope="col">OR Number</th><th scope="col" class="num">Amount</th><th scope="col">Description</th></tr></thead>
+                                    <tbody id="billingPaymentsTableBody">
+                                        <tr><td colspan="4">Loading&hellip;</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </section>
+
+                    <!-- ===================== CLEARANCE ===================== -->
+                    <section class="section-container" id="section-clearance" aria-label="Clearance" hidden>
+                        <p class="notice"><svg class="ic" aria-hidden="true"><use href="#i-info"></use></svg><span>Sample data: clearance tracking is outside this system's current scope, so these statuses are not live records.</span></p>
+                        <section class="card" aria-labelledby="clearanceProgressTitle">
+                            <div class="card__head">
+                                <h2 class="card__title" id="clearanceProgressTitle">Progress</h2>
+                                <span class="chip chip--sample">Sample</span>
+                            </div>
+                            <p class="money" id="clearanceSummary">&mdash;</p>
+                            <div class="seg-bar" id="clearanceBar" aria-hidden="true"></div>
+                        </section>
+                        <section class="card card--flush" aria-labelledby="clearanceListTitle">
+                            <div class="card__head"><h2 class="card__title" id="clearanceListTitle">Requirements</h2></div>
+                            <div class="table-wrap">
+                                <table class="data-table">
+                                    <thead><tr><th scope="col">Requirement</th><th scope="col">Office</th><th scope="col">Status</th></tr></thead>
+                                    <tbody id="clearanceTableBody">
+                                        <tr><td colspan="3">Loading&hellip;</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </section>
+
+                    <!-- ===================== PROFILE ===================== -->
+                    <section class="section-container" id="section-profile" aria-label="Profile" hidden>
+                        <section class="card profile-card" aria-labelledby="profileFullName">
+                            <span class="avatar avatar--xl" id="profileAvatar" aria-hidden="true"><svg class="ic" aria-hidden="true"><use href="#i-user"></use></svg></span>
+                            <div class="profile-card__text">
+                                <h2 class="profile-name" id="profileFullName">Loading&hellip;</h2>
+                                <p class="profile-card__meta" id="profileSummary">Loading&hellip;</p>
+                                <div class="chips">
+                                    <span class="pill pill--neutral" id="profileStatusBadge">&nbsp;</span>
+                                    <span class="pill pill--neutral" id="profileStanding">&nbsp;</span>
+                                </div>
+                            </div>
+                        </section>
+                        <section class="card card--flush" aria-labelledby="profileInfoTitle">
+                            <div class="card__head"><h2 class="card__title" id="profileInfoTitle">Personal information</h2></div>
+                            <table class="data-table kv-table">
+                                <tbody id="profileInfoTableBody">
+                                    <tr><td colspan="2">Loading&hellip;</td></tr>
+                                </tbody>
+                            </table>
+                        </section>
+                    </section>
+
+                </div>
+            </div>
+        </main>
     </div>
 
-    <div class="wrapper">
-        <div class="sidebar">
-            <ul id="sidebar-nav">
-                <li class="active" data-section="section-profile"><i class="nav-icon fa-solid fa-id-card"></i><span class="nav-label">My Profile</span></li>
-                <li data-section="section-schedule"><i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-label">Class Schedule</span></li>
-                <li data-section="section-grades"><i class="nav-icon fa-solid fa-chart-line"></i><span class="nav-label">Grades Evaluation</span></li>
-                <li data-section="section-billing"><i class="nav-icon fa-solid fa-file-invoice-dollar"></i><span class="nav-label">Account/Billing Assessment</span></li>
-                <li data-section="section-clearance"><i class="nav-icon fa-solid fa-circle-check"></i><span class="nav-label">Clearance Status</span></li>
+    <!-- Phone navigation (below 900px). "More" opens the sheet underneath. -->
+    <nav class="tabbar" aria-label="Main navigation">
+        <a class="tab-item is-active" href="#home" data-section="section-home" aria-current="page"><span class="tab-item__icon"><svg class="ic" aria-hidden="true"><use href="#i-home"></use></svg></span><span>Home</span></a>
+        <a class="tab-item" href="#courses" data-section="section-courses"><span class="tab-item__icon"><svg class="ic" aria-hidden="true"><use href="#i-book"></use></svg></span><span>Courses</span></a>
+        <a class="tab-item" href="#schedule" data-section="section-schedule"><span class="tab-item__icon"><svg class="ic" aria-hidden="true"><use href="#i-calendar"></use></svg></span><span>Schedule</span></a>
+        <a class="tab-item" href="#grades" data-section="section-grades"><span class="tab-item__icon"><svg class="ic" aria-hidden="true"><use href="#i-chart"></use></svg></span><span>Grades</span></a>
+        <button type="button" class="tab-item" id="btnMore" data-action="open-more" aria-haspopup="dialog" aria-controls="moreSheet"><span class="tab-item__icon"><svg class="ic" aria-hidden="true"><use href="#i-more"></use></svg></span><span>More</span></button>
+    </nav>
+
+    <dialog class="sheet" id="moreSheet" aria-labelledby="moreSheetTitle">
+        <div class="sheet__body">
+            <div class="sheet__grip" aria-hidden="true"></div>
+            <h2 class="sheet__title" id="moreSheetTitle">More</h2>
+            <ul class="sheet__list">
+                <li><a class="sheet__item" href="#account" data-section="section-billing"><svg class="ic" aria-hidden="true"><use href="#i-card"></use></svg><span class="sheet__label">Account</span><span class="chip chip--sample">Sample</span></a></li>
+                <li><a class="sheet__item" href="#clearance" data-section="section-clearance"><svg class="ic" aria-hidden="true"><use href="#i-shield"></use></svg><span class="sheet__label">Clearance</span><span class="chip chip--sample">Sample</span></a></li>
+                <li><a class="sheet__item" href="#profile" data-section="section-profile"><svg class="ic" aria-hidden="true"><use href="#i-user"></use></svg><span class="sheet__label">Profile</span></a></li>
+                <li><button type="button" class="sheet__item sheet__item--danger" data-action="logout"><svg class="ic" aria-hidden="true"><use href="#i-logout"></use></svg><span class="sheet__label">Sign out</span></button></li>
             </ul>
+            <button type="button" class="btn btn--ghost sheet__close" data-action="close-sheet">Close</button>
         </div>
-
-        <div class="content" id="main-content">
-            <h1 id="main-title">My Profile</h1>
-
-            <div class="section-container" id="section-profile" style="display: block;">
-                <div class="profile-header">
-                    <div class="profile-avatar"><i class="fa-solid fa-user-graduate"></i></div>
-                    <div class="profile-heading">
-                        <h2 id="profileFullName">Loading&hellip;</h2>
-                        <p class="text-muted" id="profileSummary">Loading&hellip;</p>
-                        <span class="badge bg-success" id="profileStatusBadge">&nbsp;</span>
-                    </div>
-                </div>
-
-                <div class="cards-container">
-                    <div class="card card--stat">
-                        <div class="card-icon"><i class="fa-solid fa-book-open"></i></div>
-                        <div class="card-body"><h3>Enrolled Units</h3><div class="value" id="statEnrolledUnits">&mdash;</div></div>
-                    </div>
-                    <div class="card card--stat">
-                        <div class="card-icon"><i class="fa-solid fa-chart-line"></i></div>
-                        <div class="card-body"><h3>Current GWA</h3><div class="value" id="statGwa">&mdash;</div></div>
-                    </div>
-                    <div class="card card--stat">
-                        <div class="card-icon"><i class="fa-solid fa-wallet"></i></div>
-                        <div class="card-body"><h3>Outstanding Balance <span class="scope-tag">Sample</span></h3><div class="value" id="statBalance">&mdash;</div></div>
-                    </div>
-                    <div class="card card--stat">
-                        <div class="card-icon card-icon--success"><i class="fa-solid fa-circle-check"></i></div>
-                        <div class="card-body"><h3>Clearance <span class="scope-tag">Sample</span></h3><div class="value" id="statClearance">&mdash;</div></div>
-                    </div>
-                </div>
-
-                <h2>Personal Information</h2>
-                <table>
-                    <tbody id="profileInfoTableBody">
-                        <tr><td colspan="2">Loading&hellip;</td></tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="section-container" id="section-schedule">
-                <h2 id="scheduleTitle">Class Schedule</h2>
-                <p class="sample-notice"><i class="fa-solid fa-circle-info"></i> Sample data: class scheduling is outside this system's current scope, so these rows are not live records.</p>
-                <table>
-                    <thead>
-                        <tr><th>Subject Code</th><th>Description</th><th>Units</th><th>Day / Time</th><th>Room</th><th>Instructor</th></tr>
-                    </thead>
-                    <tbody id="scheduleTableBody">
-                        <tr><td colspan="6">Loading&hellip;</td></tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="section-container" id="section-grades">
-                <h2>Grades Evaluation</h2>
-                <div class="cards-container">
-                    <div class="card card--stat">
-                        <div class="card-icon"><i class="fa-solid fa-award"></i></div>
-                        <div class="card-body"><h3>General Weighted Average</h3><div class="value" id="gradesGwa">&mdash;</div></div>
-                    </div>
-                    <div class="card card--stat">
-                        <div class="card-icon card-icon--success"><i class="fa-solid fa-circle-check"></i></div>
-                        <div class="card-body"><h3>Academic Standing</h3><div class="value" id="gradesStanding">&mdash;</div></div>
-                    </div>
-                </div>
-
-                <div class="filter-bar">
-                    <select id="gradesTermFilter">
-                        <option>Loading&hellip;</option>
-                    </select>
-                    <button id="btnPrintGrades"><i class="fa-solid fa-print"></i> Print Report</button>
-                </div>
-                <table>
-                    <thead>
-                        <tr><th>Subject Code</th><th>Subject Title</th><th>Units</th><th>Grade</th><th>Remarks</th></tr>
-                    </thead>
-                    <tbody id="gradesTableBody">
-                        <tr><td colspan="5">Loading&hellip;</td></tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="section-container" id="section-billing">
-                <h2>Account / Billing Assessment</h2>
-                <p class="sample-notice"><i class="fa-solid fa-circle-info"></i> Sample data: billing and payments are outside this system's current scope, so these figures are not live records.</p>
-                <div class="card card--success" style="margin-bottom: 24px;">
-                    <h3>Total Balance Due</h3>
-                    <div class="value" id="billingBalance">&mdash;</div>
-                    <p class="status-positive" id="billingStatus"><i class="fa-solid fa-circle-check"></i> <span id="billingStatusText">Loading&hellip;</span></p>
-                </div>
-
-                <h3 id="billingFeesTitle">Assessment of Fees</h3>
-                <table>
-                    <thead>
-                        <tr><th>Fee Type</th><th>Amount (₱)</th></tr>
-                    </thead>
-                    <tbody id="billingFeesTableBody">
-                        <tr><td colspan="2">Loading&hellip;</td></tr>
-                    </tbody>
-                </table>
-
-                <h3 style="margin-top: 24px;">Payment History</h3>
-                <table>
-                    <thead>
-                        <tr><th>Date</th><th>OR Number</th><th>Amount (₱)</th><th>Description</th></tr>
-                    </thead>
-                    <tbody id="billingPaymentsTableBody">
-                        <tr><td colspan="4">Loading&hellip;</td></tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="section-container" id="section-clearance">
-                <h2>Clearance Status</h2>
-                <p class="sample-notice"><i class="fa-solid fa-circle-info"></i> Sample data: clearance tracking is outside this system's current scope, so these statuses are not live records.</p>
-                <table>
-                    <thead>
-                        <tr><th>Requirement</th><th>Office</th><th>Status</th></tr>
-                    </thead>
-                    <tbody id="clearanceTableBody">
-                        <tr><td colspan="3">Loading&hellip;</td></tr>
-                    </tbody>
-                </table>
-            </div>
-
-        </div>
-    </div>
+    </dialog>
 
     <script src="student_dashboard.js"></script>
 </body>
