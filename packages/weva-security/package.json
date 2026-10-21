@@ -1,0 +1,37 @@
+{
+  "name": "weva-security",
+  "version": "0.1.0",
+  "description": "WEVA (Weighted Endpoint & Velocity Algorithm) as drop-in Express middleware: scores each request by velocity x endpoint weight x fail rate, then throttles (429) or blocks (403).",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "lib/"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "test:parity": "node --test test/production-parity.js",
+    "example": "node examples/server.js",
+    "attack": "node examples/attack.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "express",
+    "middleware",
+    "security",
+    "brute-force",
+    "anomaly-detection",
+    "rate-limiting",
+    "weva"
+  ],
+  "author": "Khynne Mark Elmer Lawan",
+  "license": "ISC",
+  "devDependencies": {
+    "express": "^5.2.1"
+  }
+}
