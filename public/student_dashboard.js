@@ -24,11 +24,7 @@ const STUDENT_SESSION = { token: 'sis.student.token', email: 'sis.student.email'
 if (!localStorage.getItem(STUDENT_SESSION.token)) {
     window.location.replace('index.html');
 } else {
-    console.log('[student_dashboard] Script parsed. Waiting for DOMContentLoaded...');
-
     document.addEventListener('DOMContentLoaded', () => {
-    console.log('[student_dashboard] DOMContentLoaded fired. Beginning initialization.');
-
     // =============================================================
     // CONFIG + SHARED HELPERS
     // =============================================================
@@ -144,7 +140,6 @@ if (!localStorage.getItem(STUDENT_SESSION.token)) {
         return response;
     }
 
-    console.log('[student_dashboard] Helpers defined.');
 
     // =============================================================
     // NAVIGATION (sidebar, phone tab bar, "More" sheet, in-page links)
@@ -220,7 +215,6 @@ if (!localStorage.getItem(STUDENT_SESSION.token)) {
     }
 
     try {
-        console.log('[student_dashboard] Wiring navigation...');
         const sidebarNav = document.getElementById('sidebar-nav');
         const moreSheet = document.getElementById('moreSheet');
         if (!sidebarNav) throw new Error('#sidebar-nav not found in the DOM.');
@@ -271,7 +265,6 @@ if (!localStorage.getItem(STUDENT_SESSION.token)) {
         });
 
         showSection(sectionForHash(window.location.hash) || HOME_SECTION);
-        console.log('[student_dashboard] Navigation wired successfully.');
     } catch (err) {
         console.error('[student_dashboard] Failed to wire navigation:', err.message);
     }
@@ -284,12 +277,10 @@ if (!localStorage.getItem(STUDENT_SESSION.token)) {
     // does the formatting - hiding page chrome and printing only whichever
     // .section-container is currently visible.
     try {
-        console.log('[student_dashboard] Wiring printable grades report...');
         const btnPrintGrades = document.getElementById('btnPrintGrades');
         if (!btnPrintGrades) throw new Error('#btnPrintGrades not found in the DOM.');
 
         btnPrintGrades.addEventListener('click', () => window.print());
-        console.log('[student_dashboard] Printable grades report wired successfully.');
     } catch (err) {
         console.error('[student_dashboard] Failed to wire printable grades report:', err.message);
     }
@@ -305,7 +296,6 @@ if (!localStorage.getItem(STUDENT_SESSION.token)) {
     // token. If the server cannot be reached (5 s timeout), the browser
     // still signs out; the session then expires on its own schedule.
     try {
-        console.log('[student_dashboard] Wiring logout...');
         const btnLogout = document.getElementById('btnLogout');
         if (!btnLogout) throw new Error('#btnLogout not found in the DOM.');
 
@@ -327,7 +317,6 @@ if (!localStorage.getItem(STUDENT_SESSION.token)) {
             localStorage.removeItem(STUDENT_SESSION.email);
             window.location.href = btnLogout.getAttribute('href') || 'index.html';
         });
-        console.log('[student_dashboard] Logout wired successfully.');
     } catch (err) {
         console.error('[student_dashboard] Failed to wire logout:', err.message);
     }
@@ -1276,7 +1265,6 @@ if (!localStorage.getItem(STUDENT_SESSION.token)) {
      * @returns {Promise<void>}
      */
     async function loadDashboardData() {
-        console.log('[student_dashboard] Loading dashboard data from /api/students/me...');
         try {
             const response = await authFetch('/api/students/me');
             const data = await response.json();
@@ -1303,14 +1291,11 @@ if (!localStorage.getItem(STUDENT_SESSION.token)) {
                     console.error(`[student_dashboard] Failed to render ${name}:`, err.message);
                 }
             }
-            console.log('[student_dashboard] Dashboard data loaded and rendered.');
         } catch (err) {
             console.error('[student_dashboard] Failed to load dashboard data:', err.message);
         }
     }
 
     loadDashboardData();
-
-    console.log('[student_dashboard] Initialization complete.');
     });
 }

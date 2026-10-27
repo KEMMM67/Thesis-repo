@@ -179,7 +179,6 @@ loginForm.addEventListener('submit', async function(event) {
 
     try {
         const deviceId = getDeviceId();
-        console.log("Device ID:", deviceId);
 
         // x-device-id is pre-auth telemetry for the behavioral layer, not an
         // identity assertion; the server never trusts client-supplied identity.

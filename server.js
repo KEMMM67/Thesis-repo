@@ -111,11 +111,6 @@ app.get('/healthz', async (req, res) => {
     }
 });
 
-app.use((req, res, next) => {
-    console.log(`\n[TRAFFIC DETECTED] Request received on endpoint: ${req.path}`);
-    next();
-});
-
 // Resolved from this file's own location, not the process's working
 // directory, so static serving cannot be pointed at an unintended
 // directory (e.g. the project root, exposing server.js and core/) if the

@@ -27,11 +27,7 @@ const ADMIN_SESSION = { token: 'sis.admin.token', email: 'sis.admin.email' };
 if (!localStorage.getItem(ADMIN_SESSION.token)) {
     window.location.replace('admin_login.html');
 } else {
-    console.log('[admin_dashboard] Script parsed. Waiting for DOMContentLoaded...');
-
     document.addEventListener('DOMContentLoaded', () => {
-    console.log('[admin_dashboard] DOMContentLoaded fired. Beginning initialization.');
-
     // =============================================================
     // CONFIG + SHARED HELPERS
     // =============================================================
@@ -139,7 +135,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
         const topbar = document.querySelector('.topbar');
         if (!topbar) throw new Error('.topbar not found in the DOM.');
         topbar.insertAdjacentElement('afterend', rateLimitBanner);
-        console.log('[admin_dashboard] Rate-limit banner injected successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Rate-limit banner injection FAILED (falling back to a detached, invisible banner):', err);
         rateLimitBanner = rateLimitBanner || document.createElement('div');
@@ -1108,13 +1103,11 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
         }
     }
 
-    console.log('[admin_dashboard] Helpers defined.');
 
     // =============================================================
     // ACCOUNT MENU (topbar dropdown: Admin Settings shortcut + Logout)
     // =============================================================
     try {
-        console.log('[admin_dashboard] Wiring account menu...');
         const btnAccountMenu = document.getElementById('btnAccountMenu');
         const accountMenuPanel = document.getElementById('accountMenuPanel');
         const btnGoToSettings = document.getElementById('btnGoToSettings');
@@ -1160,8 +1153,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
             btnLogout.disabled = true;
             logout();
         });
-
-        console.log('[admin_dashboard] Account menu wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Account menu wiring FAILED:', err);
     }
@@ -1170,7 +1161,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
     // SIDEBAR NAVIGATION
     // =============================================================
     try {
-        console.log('[admin_dashboard] Wiring sidebar navigation...');
         const sidebarNav = document.getElementById('sidebar-nav');
         const mainTitle = document.getElementById('main-title');
         const sectionContainers = document.querySelectorAll('.section-container');
@@ -1209,7 +1199,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
                 loadSubjects();
             }
         });
-        console.log(`[admin_dashboard] Sidebar navigation wired successfully (${sidebarNav.querySelectorAll('li').length} items, ${sectionContainers.length} sections).`);
     } catch (err) {
         console.error('[admin_dashboard] Sidebar navigation wiring FAILED:', err);
     }
@@ -1218,7 +1207,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
     // LIVE ANOMALY CHART (WEVA Score Feed)
     // =============================================================
     try {
-        console.log('[admin_dashboard] Wiring live anomaly chart...');
         const canvas = document.getElementById('anomalyChart');
         if (!canvas) throw new Error('#anomalyChart not found in the DOM.');
         const ctx = canvas.getContext('2d');
@@ -1372,8 +1360,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
             matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
                 .addEventListener('change', () => { drawChart(); watchPixelRatio(); }, { once: true });
         })();
-
-        console.log('[admin_dashboard] Live anomaly chart wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Live anomaly chart wiring FAILED:', err);
     }
@@ -1386,7 +1372,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
     // but only while the Dashboard is on screen and the tab is visible,
     // since each refresh runs seven COUNT queries against the database.
     try {
-        console.log('[admin_dashboard] Wiring stat cards...');
         const dashboardSection = document.getElementById('section-dashboard');
         if (!dashboardSection) throw new Error('#section-dashboard not found in the DOM.');
 
@@ -1394,7 +1379,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
         setInterval(() => {
             if (dashboardSection.style.display !== 'none' && !document.hidden) loadStats();
         }, 5000);
-        console.log('[admin_dashboard] Stat cards wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Stat cards wiring FAILED:', err);
     }
@@ -1403,7 +1387,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
     // DEMO MODE (Simulate Attack)
     // =============================================================
     try {
-        console.log('[admin_dashboard] Wiring demo attack simulation...');
         const btnSimulateAttack = document.getElementById('btnSimulateAttack');
         const demoStatus = document.getElementById('demoStatus');
         if (!btnSimulateAttack) throw new Error('#btnSimulateAttack not found in the DOM.');
@@ -1491,8 +1474,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
                 loadStats();
             }
         });
-
-        console.log('[admin_dashboard] Demo attack simulation wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Demo attack simulation wiring FAILED:', err);
     }
@@ -1510,7 +1491,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
     // are scored too. Filters search as the admin types, debounced, so a
     // search costs one scored request per pause rather than per keystroke.
     try {
-        console.log('[admin_dashboard] Wiring security logs and audit trail...');
         const byId = (id) => {
             const element = document.getElementById(id);
             if (!element) throw new Error(`#${id} not found in the DOM.`);
@@ -1618,7 +1598,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
         byId('btnRefreshLogs').addEventListener('click', fetchLogs);
         byId('btnRefreshAudit').addEventListener('click', loadAudit);
         byId('btnVerifyAudit').addEventListener('click', verifyAudit);
-        console.log('[admin_dashboard] Security logs and audit trail wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Security logs / audit trail wiring FAILED:', err);
     }
@@ -1635,7 +1614,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
     // which rows of how many, and for the Audit Trail the latest integrity
     // check. A report that prints 50 rows must not read as the whole log.
     try {
-        console.log('[admin_dashboard] Wiring printable audit report...');
         const btnGenerateReport = document.getElementById('btnGenerateReport');
         const reportTimestamp = document.getElementById('reportTimestamp');
         const reportScope = document.getElementById('reportScope');
@@ -1678,7 +1656,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
         };
         btnGenerateReport.addEventListener('click', printReport);
         document.querySelectorAll('.js-print-report').forEach(button => button.addEventListener('click', printReport));
-        console.log('[admin_dashboard] Printable audit report wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Printable audit report wiring FAILED:', err);
     }
@@ -1687,7 +1664,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
     // BLOCKED DEVICES PANEL
     // =============================================================
     try {
-        console.log('[admin_dashboard] Wiring Blocked Devices panel...');
         const btnRefreshBlockedDevices = document.getElementById('btnRefreshBlockedDevices');
         const blockedDevicesTableBody = document.getElementById('blockedDevicesTableBody');
         if (!btnRefreshBlockedDevices) throw new Error('#btnRefreshBlockedDevices not found in the DOM.');
@@ -1741,8 +1717,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
             showResult(data);
             if (data.success) fetchBlockedDevices();
         });
-
-        console.log('[admin_dashboard] Blocked Devices panel wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Blocked Devices panel wiring FAILED:', err);
     }
@@ -1759,7 +1733,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
     // partway, reading the body fails and nothing is saved: a truncated
     // snapshot can never be downloaded as if it were complete.
     try {
-        console.log('[admin_dashboard] Wiring data export...');
         const btnBackupDatabase = document.getElementById('btnBackupDatabase');
         if (!btnBackupDatabase) throw new Error('#btnBackupDatabase not found in the DOM.');
         const idleHtml = btnBackupDatabase.innerHTML;
@@ -1776,7 +1749,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
         btnBackupDatabase.addEventListener('click', async () => {
             btnBackupDatabase.disabled = true;
             btnBackupDatabase.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Exporting...';
-            console.log('[admin_dashboard] Snapshot requested - fetching /api/admin/backup...');
 
             try {
                 const response = await authFetch('/api/admin/backup');
@@ -1800,7 +1772,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
                 document.body.removeChild(link);
                 URL.revokeObjectURL(url);
 
-                console.log(`[admin_dashboard] Snapshot downloaded as ${filename} (${blob.size} bytes).`);
                 alert(`Snapshot downloaded: ${filename}`);
             } catch (err) {
                 console.error('[admin_dashboard] Snapshot export failed:', err);
@@ -1810,8 +1781,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
                 btnBackupDatabase.innerHTML = idleHtml;
             }
         });
-
-        console.log('[admin_dashboard] Data export wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Data export wiring FAILED:', err);
     }
@@ -1820,7 +1789,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
     // STUDENT RECORDS (modal-based Add/Edit, real persistence)
     // =============================================================
     try {
-        console.log('[admin_dashboard] Wiring Student Records...');
         const studentsTableBody = document.getElementById('studentsTableBody');
         const btnAddStudent = document.getElementById('btnAddStudent');
         const studentModal = document.getElementById('studentModal');
@@ -1975,7 +1943,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
                 if (data.success) loadStudents(); // keeps the page full and the "of N" count right
             }
         });
-        console.log('[admin_dashboard] Student Records wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Student Records wiring FAILED:', err);
     }
@@ -1984,7 +1951,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
     // SUBJECT MANAGEMENT (mirrors Student Records above)
     // =============================================================
     try {
-        console.log('[admin_dashboard] Wiring Subject Management...');
         const subjectsTableBody = document.getElementById('subjectsTableBody');
         const btnAddSubject = document.getElementById('btnAddSubject');
         const subjectModal = document.getElementById('subjectModal');
@@ -2097,7 +2063,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
                 if (data.success) loadSubjects(); // keeps the count right
             }
         });
-        console.log('[admin_dashboard] Subject Management wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Subject Management wiring FAILED:', err);
     }
@@ -2109,7 +2074,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
     // student, their decrypted grades, and the same units/GWA/standing
     // summary the student sees on their own dashboard.
     try {
-        console.log('[admin_dashboard] Wiring Grade Management lookup...');
         const gradeSearchInput = document.getElementById('gradeSearchInput');
         const btnGradeSearch = document.getElementById('btnGradeSearch');
         const gradeEmptyState = document.getElementById('gradeEmptyState');
@@ -2218,7 +2182,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
 
         // Exact-ID lookup, so it only runs on Search/Enter (debounce 0).
         wireSearchBox(gradeSearchInput, btnGradeSearch, lookUpGrades, 0);
-        console.log('[admin_dashboard] Grade Management lookup wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Grade Management lookup wiring FAILED:', err);
     }
@@ -2230,7 +2193,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
     // there is no Payment model or payments API yet - so this search
     // filters those rows in place rather than querying the server.
     try {
-        console.log('[admin_dashboard] Wiring Payment Records search...');
         const paymentSearchInput = document.getElementById('paymentSearchInput');
         const btnPaymentSearch = document.getElementById('btnPaymentSearch');
         const paymentsTableBody = document.getElementById('paymentsTableBody');
@@ -2273,7 +2235,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
 
         wireSearchBox(paymentSearchInput, btnPaymentSearch, filterPayments, 150);
         filterPayments('');
-        console.log('[admin_dashboard] Payment Records search wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Payment Records search wiring FAILED:', err);
     }
@@ -2284,7 +2245,6 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
     // Posts to POST /api/admin/accounts (server.js), weighted at the
     // maximum 4x sensitivity tier in core/scorer.js.
     try {
-        console.log('[admin_dashboard] Wiring Create Admin Account...');
         const btnCreateAdmin = document.getElementById('btnCreateAdmin');
         const adminModal = document.getElementById('adminModal');
         const adminForm = document.getElementById('adminForm');
@@ -2323,12 +2283,8 @@ if (!localStorage.getItem(ADMIN_SESSION.token)) {
             showResult(data);
             if (data.success) adminModal.close();
         });
-
-        console.log('[admin_dashboard] Create Admin Account wired successfully.');
     } catch (err) {
         console.error('[admin_dashboard] Create Admin Account wiring FAILED:', err);
     }
-
-    console.log('[admin_dashboard] Initialization complete.');
     });
 }
